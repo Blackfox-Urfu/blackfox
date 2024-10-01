@@ -1,0 +1,11 @@
+# Игнорирование конфиденциальных файлов
+README.md
+anon.session-journal
+client.session
+keys.py
+__pycache__/
+my_session.session
+bot.session
+forward_bot.session
+poetry.lock
+vectorizer.pkl
