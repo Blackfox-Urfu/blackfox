@@ -9,3 +9,5 @@ bot.session
 forward_bot.session
 poetry.lock
 vectorizer.pkl
+anon.session
+*.swp
