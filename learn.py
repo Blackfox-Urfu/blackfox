@@ -104,11 +104,13 @@ param_grid_gb = {
 }
 
 # Грид-поиск для моделей
+# Грид-поиск для моделей с многопоточностью
 grid_searches = {
-    'Logistic Regression': GridSearchCV(LogisticRegression(max_iter=1000), param_grid_lr, cv=5, scoring='accuracy'),
-    'Random Forest': GridSearchCV(RandomForestClassifier(), param_grid_rf, cv=5, scoring='accuracy'),
-    'Gradient Boosting': GridSearchCV(GradientBoostingClassifier(), param_grid_gb, cv=5, scoring='accuracy')
+    'Logistic Regression': GridSearchCV(LogisticRegression(max_iter=1000), param_grid_lr, cv=5, scoring='accuracy', n_jobs=-1),
+    'Random Forest': GridSearchCV(RandomForestClassifier(n_jobs=-1), param_grid_rf, cv=5, scoring='accuracy', n_jobs=-1),
+    'Gradient Boosting': GridSearchCV(GradientBoostingClassifier(), param_grid_gb, cv=5, scoring='accuracy', n_jobs=-1)
 }
+
 
 # Обучение и оценка моделей
 results = {}
