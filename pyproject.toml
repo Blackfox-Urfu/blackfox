@@ -11,6 +11,8 @@ scikit-learn = "^1.5.2"
 tensorrt = "^10.6.0.post1"
 optuna = "^4.1.0"
 tensorflow = {extras = ["and-cuda"], version = "^2.18.0"}
+matplotlib = "^3.9.3"
+chardet = "^5.2.0"
 
 
 [build-system]

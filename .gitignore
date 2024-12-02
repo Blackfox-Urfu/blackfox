@@ -11,3 +11,5 @@ poetry.lock
 vectorizer.pkl
 anon.session
 *.swp
+data/
+random_dataset_test/
