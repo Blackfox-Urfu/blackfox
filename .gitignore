@@ -11,3 +11,4 @@ poetry.lock
 vectorizer.pkl
 anon.session
 *.swp
+pyproject.toml

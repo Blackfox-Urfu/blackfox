@@ -3,13 +3,15 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from imblearn.over_sampling import SMOTE
-import seaborn as sns
 import joblib
 from datetime import datetime
 import os
+from nltk.corpus import stopwords
+import nltk
+import optuna
 
 # Загрузка данных
 def load_data(filepath):
@@ -17,11 +19,9 @@ def load_data(filepath):
         data = json.load(file)
     return data
 
-
 # Очистка текста
 def clean_text(text):
     return text.replace('\n', ' ').replace('\r', '')
-
 
 # Извлечение текста из сообщения
 def extract_text(message):
@@ -32,7 +32,6 @@ def extract_text(message):
         else:
             full_text += part
     return full_text
-
 
 # Извлечение данных из сообщения
 def extract_message_data(message):
@@ -45,7 +44,6 @@ def extract_message_data(message):
         "photo": message.get("photo", None),
         "text": extract_text(message)
     }
-
 
 # Загрузка и обработка данных
 def process_data(ad_filepath, non_ad_filepath):
@@ -60,19 +58,18 @@ def process_data(ad_filepath, non_ad_filepath):
 
     return texts, labels
 
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 ad_filepath = os.path.join(BASE_DIR, 'data/reklama', 'result.json')
 non_ad_filepath = os.path.join(BASE_DIR, 'data/nereklama', 'result.json')
-
 texts, labels = process_data(ad_filepath, non_ad_filepath)
 
 # Разделение данных на обучающую и тестовую выборки
 train_texts, test_texts, train_labels, test_labels = train_test_split(texts, labels, test_size=0.2, random_state=42)
 
 # Векторизация текста с помощью TF-IDF
-vectorizer = TfidfVectorizer(max_features=10000, stop_words='english', ngram_range=(1, 2))
+nltk.download('stopwords')
+russian_stop_words = stopwords.words('russian')
+vectorizer = TfidfVectorizer(max_features=10000, stop_words=russian_stop_words, ngram_range=(1, 2))
 train_vectors = vectorizer.fit_transform(train_texts)
 test_vectors = vectorizer.transform(test_texts)
 
@@ -80,65 +77,65 @@ test_vectors = vectorizer.transform(test_texts)
 smote = SMOTE(random_state=42)
 train_vectors_balanced, train_labels_balanced = smote.fit_resample(train_vectors, train_labels)
 
-# Определение моделей для тестирования
-models = {
-    'Logistic Regression': LogisticRegression(max_iter=1000),  # Увеличение max_iter
-    'Random Forest': RandomForestClassifier(),
-    'Gradient Boosting': GradientBoostingClassifier()
-}
+# Оптимизация гиперпараметров с Optuna
+def optimize_random_forest(trial):
+    n_estimators = trial.suggest_int('n_estimators', 50, 300)
+    max_depth = trial.suggest_int('max_depth', 5, 50)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
+    model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        random_state=42,
+        n_jobs=-1
+    )
+    model.fit(train_vectors_balanced, train_labels_balanced)
+    predictions = model.predict(test_vectors)
+    return accuracy_score(test_labels, predictions)
 
-# Гиперпараметрическая оптимизация для Random Forest и Gradient Boosting
-param_grid_lr = {
-    'C': [0.01, 0.1, 1, 10, 100],  # Регуляризация
-    'solver': ['newton-cg', 'lbfgs', 'liblinear', 'sag', 'saga']
-}
-param_grid_rf = {
-    'n_estimators': [100, 200],
-    'max_depth': [None, 10, 20],
-    'min_samples_split': [2, 5]
-}
-param_grid_gb = {
-    'n_estimators': [100, 200],
-    'learning_rate': [0.1, 0.05],
-    'max_depth': [3, 5]
-}
+def optimize_gradient_boosting(trial):
+    n_estimators = trial.suggest_int('n_estimators', 50, 300)
+    learning_rate = trial.suggest_float('learning_rate', 0.01, 0.3)
+    max_depth = trial.suggest_int('max_depth', 3, 10)
+    model = GradientBoostingClassifier(
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        max_depth=max_depth,
+        random_state=42
+    )
+    model.fit(train_vectors_balanced, train_labels_balanced)
+    predictions = model.predict(test_vectors)
+    return accuracy_score(test_labels, predictions)
 
-# Грид-поиск для моделей
-# Грид-поиск для моделей с многопоточностью
-grid_searches = {
-    'Logistic Regression': GridSearchCV(LogisticRegression(max_iter=1000), param_grid_lr, cv=5, scoring='accuracy', n_jobs=-1),
-    'Random Forest': GridSearchCV(RandomForestClassifier(n_jobs=-1), param_grid_rf, cv=5, scoring='accuracy', n_jobs=-1),
-    'Gradient Boosting': GridSearchCV(GradientBoostingClassifier(), param_grid_gb, cv=5, scoring='accuracy', n_jobs=-1)
-}
+# Оптимизация Random Forest
+print('Optimize random forest')
+study_rf = optuna.create_study(direction='maximize')
+study_rf.optimize(optimize_random_forest, n_trials=100)
+print("Best Random Forest parameters for RANDOM FOREST:", study_rf.best_params)
 
+# Оптимизация Gradient Boosting
+print('Optimize gradient boosting')
+study_gb = optuna.create_study(direction='maximize')
+study_gb.optimize(optimize_gradient_boosting, n_trials=100)
+print("Best Gradient Boosting parameters:", study_gb.best_params)
 
-# Обучение и оценка моделей
-results = {}
-for model_name, grid_search in grid_searches.items():
-    grid_search.fit(train_vectors_balanced, train_labels_balanced)
-    best_model = grid_search.best_estimator_
+# Финальное обучение моделей с лучшими гиперпараметрами
+rf_best = RandomForestClassifier(**study_rf.best_params, random_state=42, n_jobs=-1)
+rf_best.fit(train_vectors_balanced, train_labels_balanced)
+rf_predictions = rf_best.predict(test_vectors)
 
-    predictions = best_model.predict(test_vectors)
-    accuracy = accuracy_score(test_labels, predictions)
-    report = classification_report(test_labels, predictions)
-    conf_matrix = confusion_matrix(test_labels, predictions)
+gb_best = GradientBoostingClassifier(**study_gb.best_params, random_state=42)
+gb_best.fit(train_vectors_balanced, train_labels_balanced)
+gb_predictions = gb_best.predict(test_vectors)
 
-    results[model_name] = {
-        'accuracy': accuracy,
-        'report': report,
-        'conf_matrix': conf_matrix
-    }
-
-    print(f'{model_name} Test Accuracy: {accuracy}')
-    print(f'{model_name} Classification Report:')
-    print(report)
-
-    
+# Оценка моделей
+rf_accuracy = accuracy_score(test_labels, rf_predictions)
+gb_accuracy = accuracy_score(test_labels, gb_predictions)
+print(f"Random Forest Test Accuracy: {rf_accuracy}")
+print(f"Gradient Boosting Test Accuracy: {gb_accuracy}")
 
 # Сохранение лучшей модели и векторизатора
-best_model_name = max(results, key=lambda name: results[name]['accuracy'])
-best_model = grid_searches[best_model_name].best_estimator_
-
+best_model = rf_best if rf_accuracy > gb_accuracy else gb_best
 joblib.dump(best_model, 'best_model.pkl')
 joblib.dump(vectorizer, 'vectorizer.pkl')
 
