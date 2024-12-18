@@ -97,7 +97,7 @@ def dataset_statistics(texts, labels):
     print(f"Unique words: {len(unique_words)}")
     
     # Статистика для каждого класса
-    print("\nPer-Class Statistics:")
+    print(f"\n{'-'*10}\nPer-Class Statistics:")
     for label in label_counts.keys():
         class_texts = [texts[i] for i in range(total_messages) if labels[i] == label and texts[i].strip()]
         class_lengths = [len(text.split()) for text in class_texts]
@@ -108,6 +108,7 @@ def dataset_statistics(texts, labels):
         print(f"  Total messages: {len(class_texts)}")
         print(f"  Average message length: {avg_class_length:.2f} words")
         print(f"  Total words in class: {total_class_length}")
+        print(f'{"-"*5}')
 
     # Соотношение классов
     if len(label_counts) == 2:  # Подходит для бинарной классификации
@@ -141,10 +142,12 @@ train_vectors_balanced, train_labels_balanced = smote.fit_resample(train_vectors
 # Подсчет количества сообщений в каждом классе после SMOTE
 balanced_class_counts = Counter(train_labels_balanced)
 # Вывод количества сообщений для каждого класса после SMOTE
-print('SMOTE DATA')
+print(f'{'-'*10}\nSMOTE DATA')
 print("Balanced dataset class distribution:")
 for label, count in balanced_class_counts.items():
     print(f"Class {label}: {count}")
+print(f'{'-'*10}\n')
+
 # Расчет Class imbalance ratio после SMOTE
 class_imbalance_ratio = balanced_class_counts[0] / balanced_class_counts[1]
 print(f"Class imbalance ratio after SMOTE: {class_imbalance_ratio:.2f}")
