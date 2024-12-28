@@ -56,8 +56,9 @@ def process_data(ad_filepath, non_ad_filepath):
     ad_data = load_data(ad_filepath)
     non_ad_data = load_data(non_ad_filepath)
 
-    ad_texts = [extract_message_data(msg) for msg in ad_data['messages']]
-    non_ad_texts = [extract_message_data(msg) for msg in non_ad_data['messages']]
+    ad_texts = [extract_message_data(msg) for msg in ad_data['messages'] if clean_text(extract_text(msg))]
+    non_ad_texts = [extract_message_data(msg) for msg in non_ad_data['messages'] if clean_text(extract_text(msg))]
+
 
     # Сохраняем посты в CSV
     save_to_csv(ad_texts + non_ad_texts, 'posts_data.csv')
@@ -154,9 +155,9 @@ print(f"Class imbalance ratio after SMOTE: {class_imbalance_ratio:.2f}")
 
 # Оптимизация гиперпараметров Random Forest с помощью Optuna
 def optimize_random_forest(trial):
-    n_estimators = trial.suggest_int('n_estimators', 462, 464)
-    max_depth = trial.suggest_int('max_depth', 136, 138)
-    min_samples_split = trial.suggest_int('min_samples_split', 2, 4)
+    n_estimators = trial.suggest_int('n_estimators', 370, 380)
+    max_depth = trial.suggest_int('max_depth', 270, 285)
+    min_samples_split = trial.suggest_int('min_samples_split', 2,8)
     model = RandomForestClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -170,7 +171,7 @@ def optimize_random_forest(trial):
 
 print('Optimize random forest')
 study_rf = optuna.create_study(direction='maximize')
-study_rf.optimize(optimize_random_forest, n_trials=10)
+study_rf.optimize(optimize_random_forest, n_trials=100)
 print("Best Random Forest parameters:", study_rf.best_params)
 
 # Финальное обучение модели с лучшими гиперпараметрами
