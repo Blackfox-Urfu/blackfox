@@ -13,3 +13,4 @@ anon.session
 *.swp
 pyproject.toml
 data/
+.env
