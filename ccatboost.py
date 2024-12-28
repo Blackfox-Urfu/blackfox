@@ -49,8 +49,8 @@ def process_data(ad_filepath, non_ad_filepath):
     ad_data = load_data(ad_filepath)
     non_ad_data = load_data(non_ad_filepath)
 
-    ad_texts = [clean_text(extract_message_data(msg)['text']) for msg in ad_data['messages']]
-    non_ad_texts = [clean_text(extract_message_data(msg)['text']) for msg in non_ad_data['messages']]
+    ad_texts = [extract_message_data(msg) for msg in ad_data['messages'] if clean_text(extract_text(msg))]
+    non_ad_texts = [extract_message_data(msg) for msg in non_ad_data['messages'] if clean_text(extract_text(msg))]
 
     texts = ad_texts + non_ad_texts
     labels = [1] * len(ad_texts) + [0] * len(non_ad_texts)
@@ -69,8 +69,13 @@ train_texts, test_texts, train_labels, test_labels = train_test_split(texts, lab
 nltk.download('stopwords')
 russian_stop_words = stopwords.words('russian')
 vectorizer = TfidfVectorizer(max_features=4000, stop_words=russian_stop_words, ngram_range=(1, 2))
-train_vectors = vectorizer.fit_transform(train_texts)
-test_vectors = vectorizer.transform(test_texts)
+# Извлекаем только тексты
+train_texts_cleaned = [msg['text'] for msg in train_texts if 'text' in msg]
+test_texts_cleaned = [msg['text'] for msg in test_texts if 'text' in msg]
+
+train_vectors = vectorizer.fit_transform(train_texts_cleaned)
+test_vectors = vectorizer.transform(test_texts_cleaned)
+
 
 # Балансировка классов с помощью SMOTE (опционально)
 smote = SMOTE(random_state=42)
