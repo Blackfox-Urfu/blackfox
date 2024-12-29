@@ -8,7 +8,6 @@ my_session.session
 bot.session
 forward_bot.session
 poetry.lock
-vectorizer.pkl
 anon.session
 *.swp
 pyproject.toml

@@ -184,6 +184,6 @@ rf_accuracy = accuracy_score(test_labels, rf_predictions)
 print(f"Random Forest Test Accuracy: {rf_accuracy}")
 
 # Сохранение модели и векторизатора
-joblib.dump(rf_best, 'best_model.pkl')
-joblib.dump(vectorizer, 'vectorizer.pkl')
+joblib.dump(rf_best, 'randfor_best_model.pkl')
+joblib.dump(vectorizer, 'randfor_vectorizer.pkl')
 print('Best model and vectorizer saved to disk.')

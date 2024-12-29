@@ -83,10 +83,10 @@ train_vectors_balanced, train_labels_balanced = smote.fit_resample(train_vectors
 
 # Оптимизация гиперпараметров CatBoost с Optuna
 def optimize_catboost(trial):
-    iterations = trial.suggest_int('iterations', 10, 600)
-    depth = trial.suggest_int('depth', 4, 12)
+    iterations = trial.suggest_int('iterations', 10, 300)
+    depth = trial.suggest_int('depth', 2, 8)
     learning_rate = trial.suggest_float('learning_rate', 0.01, 0.3)
-    l2_leaf_reg = trial.suggest_float('l2_leaf_reg', 1, 10)
+    l2_leaf_reg = trial.suggest_float('l2_leaf_reg', 2, 8)
     loss_function = trial.suggest_categorical('loss_function', ['MultiClass', 'MultiClassOneVsAll'])
 
     
@@ -120,7 +120,7 @@ cb_accuracy = accuracy_score(test_labels, cb_predictions)
 print(f"CatBoost Test Accuracy: {cb_accuracy}")
 
 # Сохранение модели и векторизатора
-joblib.dump(cb_best, 'best_model.pkl')
-joblib.dump(vectorizer, 'vectorizer.pkl')
+joblib.dump(cb_best, 'cat_best_model.pkl')
+joblib.dump(vectorizer, 'cat_vectorizer.pkl')
 
 print('Best CatBoost model and vectorizer saved to disk.')
