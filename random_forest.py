@@ -155,9 +155,9 @@ print(f"Class imbalance ratio after SMOTE: {class_imbalance_ratio:.2f}")
 
 # Оптимизация гиперпараметров Random Forest с помощью Optuna
 def optimize_random_forest(trial):
-    n_estimators = trial.suggest_int('n_estimators', 370, 380)
-    max_depth = trial.suggest_int('max_depth', 270, 285)
-    min_samples_split = trial.suggest_int('min_samples_split', 2,8)
+    n_estimators = trial.suggest_int('n_estimators', 70, 580)
+    max_depth = trial.suggest_int('max_depth', 100, 685)
+    min_samples_split = trial.suggest_int('min_samples_split', 2,32)
     model = RandomForestClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
