@@ -11,8 +11,8 @@ import os
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
 
 # Загрузка модели и векторизатора
-model = joblib.load('best_model.pkl')
-vectorizer = joblib.load('vectorizer.pkl')
+model = joblib.load('randfor_best_model.pkl')
+vectorizer = joblib.load('randfor_vectorizer.pkl')
 
 # Загрузка переменных окружения
 load_dotenv()
