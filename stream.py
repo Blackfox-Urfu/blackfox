@@ -110,15 +110,24 @@ async def handle_message_async(channel, num_posts, target_channel, message, upda
                             last_message_id = messages[0].id
                             last_handled_id = last_message_ids.get(channel, None)
 
-                            new_messages = (
-                                [msg for msg in messages if last_handled_id is None or msg.id > last_handled_id]
-                            )
+                            # Если сообщений несколько
+                            if last_handled_id and last_message_id > last_handled_id + 1:
+                                # Обработка всех пропущенных сообщений
+                                new_messages = [
+                                    await client.get_messages(entity, ids=msg_id)
+                                    for msg_id in range(last_handled_id + 1, last_message_id + 1)
+                                ]
+                            else:
+                                # Если разрывов нет, обработать стандартно
+                                new_messages = (
+                                    [msg for msg in messages if last_handled_id is None or msg.id > last_handled_id]
+                                )
 
-                            for msg in new_messages[::-1]:
+                            for msg in new_messages:
                                 await process_message(msg, client, target_channel, channel)
 
                             if new_messages:
-                                last_message_ids[channel] = new_messages[0].id
+                                last_message_ids[channel] = new_messages[-1].id
                                 save_last_message_ids()
                         break
 
@@ -131,10 +140,10 @@ async def handle_message_async(channel, num_posts, target_channel, message, upda
                             raise e
 
             if update:
-                bot.reply_to(message, "Обновление активировано. Проверка каждые 10 секунд.")
+                bot.reply_to(message, "Обновление активировано. Проверка каждые 5 секунд.")
                 while update:
                     await fetch_posts()
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(5)
             else:
                 await fetch_posts()
                 bot.reply_to(message, "Отлично, пересылка завершена")
@@ -161,7 +170,7 @@ async def process_message(msg, client, target_channel, channel):
         text = msg.message.strip()
         if text:
             prediction = predict_ad_content(text)
-            if prediction:
+            if prediction <= 0.7:
                 sent_msg = bot.send_message(target_channel, text)
                 bot.send_message(
                     target_channel,
