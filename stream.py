@@ -1,18 +1,20 @@
 import asyncio
 import time
+import logging
+import os
+import json
 from telethon import TelegramClient
 import telebot
-import logging
 import joblib
 from dotenv import load_dotenv
-import os
+from threading import Thread
+
+# ================================
+# Конфигурация и инициализация
+# ================================
 
 # Настройка логирования
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
-
-# Загрузка модели и векторизатора
-model = joblib.load('randfor_best_model.pkl')
-vectorizer = joblib.load('randfor_vectorizer.pkl')
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -20,119 +22,119 @@ api_id = os.getenv('TELEGRAM_API_KEY')
 api_hash = os.getenv('TELEGRAM_API_HASH')
 bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
 
-# Инициализация Telebot
+# Инициализация Telebot и asyncio-цикла
 bot = telebot.TeleBot(bot_token)
-
-# Инициализация глобального asyncio-цикла
 loop = asyncio.get_event_loop()
 
-# Словарь для хранения последнего ID сообщений
-last_message_ids = {}
+# Загрузка модели и векторизатора
+model = joblib.load('randfor_best_model.pkl')
+vectorizer = joblib.load('randfor_vectorizer.pkl')
 
+# Хранилище для последних ID сообщений
+LAST_MESSAGE_IDS_FILE = "last_message_ids.json"
+
+# Функции для работы с last_message_ids
+def save_last_message_ids():
+    with open(LAST_MESSAGE_IDS_FILE, "w") as f:
+        json.dump(last_message_ids, f)
+
+def load_last_message_ids():
+    if os.path.exists(LAST_MESSAGE_IDS_FILE):
+        with open(LAST_MESSAGE_IDS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+last_message_ids = load_last_message_ids()
+
+# ================================
+# Утилитарные функции
+# ================================
 
 def predict_ad_content(post):
+    """Предсказание вероятности рекламного контента."""
     post_vector = vectorizer.transform([post])
     prediction_proba = model.predict_proba(post_vector)
-    prediction = prediction_proba[0][1]  # Вероятность класса с меткой 1 (реклама)
+    prediction = prediction_proba[0][1]
     logging.debug(f"Post: {post[:100]}... Prediction: {prediction}")
-    return prediction  # Возвращает вероятность класса "реклама" от 0 до 1
+    return prediction
 
+# ================================
+# Обработчики команд Telebot
+# ================================
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    """Отправляет приветственное сообщение и инструкцию по использованию."""
     bot.reply_to(
         message,
-        "Напиши:\n1. название канала, откуда выгрузить\n2. сколько последних постов выгрузить\n3. куда выгрузить\n\nПример ввода:\n `other_channel 10 my_channel`",
+        "Напиши:\n1. название канала, откуда выгрузить\n"
+        "2. сколько последних постов выгрузить\n"
+        "3. куда выгрузить\n\n"
+        "Пример ввода:\n `other_channel 10 my_channel`",
     )
-
 
 @bot.message_handler(content_types=["text"])
 def handle_message(message):
-    parts = str(message.text).split()
+    """Обрабатывает текстовые сообщения пользователя."""
+    parts = message.text.split()
 
     if len(parts) < 3:
-        bot.reply_to(
-            message, "Неправильный формат. Нажми /start, чтобы увидеть правильный формат ввода."
-        )
+        bot.reply_to(message, "Неправильный формат. Нажми /start, чтобы увидеть правильный формат ввода.")
         return
 
     channel, num_posts, target_channel = parts[:3]
     target_channel = "@" + target_channel
     update = 'update' in parts
 
-    # Передаем обработку в асинхронный контекст
     asyncio.run_coroutine_threadsafe(
-        handle_message_async(channel, num_posts, target_channel, message, update),
-        loop
+        handle_message_async(channel, num_posts, target_channel, message, update), loop
     )
 
+# ================================
+# Асинхронная обработка сообщений
+# ================================
 
 async def handle_message_async(channel, num_posts, target_channel, message, update):
+    """Асинхронная обработка сообщений с использованием Telethon."""
     async with TelegramClient('anon', api_id, api_hash) as client:
         try:
             async def fetch_posts():
-                while True:  # Добавлен цикл для повторной попытки в случае ошибки 429
+                """Получение и обработка постов из канала."""
+                while True:
                     try:
                         entity = await client.get_entity(channel)
-                        messages = await client.get_messages(entity, limit=int(num_posts))
+                        limit = 1 if update else int(num_posts)
+                        messages = await client.get_messages(entity, limit=limit)
 
                         if messages:
                             last_message_id = messages[0].id
                             last_handled_id = last_message_ids.get(channel, None)
 
-                            # Фильтрация только новых сообщений
-                            new_messages = [
-                                msg
-                                for msg in messages
-                                if msg.id > last_handled_id
-                            ] if last_handled_id else messages
+                            new_messages = (
+                                [msg for msg in messages if last_handled_id is None or msg.id > last_handled_id]
+                            )
 
                             for msg in new_messages[::-1]:
-                                if msg.photo or msg.video:
-                                    caption = msg.text
-                                    if caption:
-                                        prediction = predict_ad_content(caption)
-                                        if prediction:
-                                            forwarded_msg = await client.forward_messages(target_channel, msg.id, channel)
-                                            # Отправка предсказания как reply
-                                            bot.send_message(
-                                                target_channel,
-                                                f"Prediction: {prediction:.4f}",
-                                                reply_to_message_id=forwarded_msg.id
-                                            )
-                                            last_message_ids[channel] = msg.id  # Обновляем последний ID
+                                await process_message(msg, client, target_channel, channel)
 
-                                elif msg.message:
-                                    text = msg.message
-                                    if text and text.strip():
-                                        prediction = predict_ad_content(text)
-                                        if prediction <= 0.7:
-                                            sent_msg = bot.send_message(target_channel, text)
-                                            # Отправка предсказания как reply
-                                            bot.send_message(
-                                                target_channel,
-                                                f"Prediction: {prediction:.4f}",
-                                                reply_to_message_id=sent_msg.message_id
-                                            )
-                                            last_message_ids[channel] = msg.id  # Обновляем последний ID
-                        break  # Если запрос успешный, выходим из цикла
+                            if new_messages:
+                                last_message_ids[channel] = new_messages[0].id
+                                save_last_message_ids()
+                        break
 
                     except Exception as e:
                         if "429" in str(e):
-                            retry_seconds = int(
-                                str(e).split("retry after ")[-1].split(".")[0]
-                            )
-                            logging.warning(
-                                f"Превышен лимит запросов. Ожидание {retry_seconds} секунд..."
-                            )
-                            time.sleep(retry_seconds)  # Ждем перед повторной попыткой
+                            retry_seconds = int(str(e).split("retry after ")[-1].split(".")[0])
+                            logging.warning(f"Превышен лимит запросов. Ожидание {retry_seconds} секунд...")
+                            await asyncio.sleep(retry_seconds)
                         else:
-                            raise e  # Если ошибка не 429, выбрасываем дальше
-
+                            raise e
 
             if update:
-                bot.reply_to(message, "Обновление активировано. Ждемc...")
-                await fetch_posts()
+                bot.reply_to(message, "Обновление активировано. Проверка каждые 10 секунд.")
+                while update:
+                    await fetch_posts()
+                    await asyncio.sleep(10)
             else:
                 await fetch_posts()
                 bot.reply_to(message, "Отлично, пересылка завершена")
@@ -140,19 +142,42 @@ async def handle_message_async(channel, num_posts, target_channel, message, upda
         except Exception as e:
             bot.reply_to(
                 message,
-                f"Ошибка: {e}. Нажми /start, чтобы увидеть правильный формат ввода.",
-            )
+                f"Ошибка: {e}. Нажми /start, чтобы увидеть правильный формат ввода.",)
             logging.error(f"Async message handling error: {e}")
 
+async def process_message(msg, client, target_channel, channel):
+    """Обработка каждого сообщения."""
+    if msg.photo or msg.video:
+        caption = msg.text
+        if caption:
+            prediction = predict_ad_content(caption)
+            if prediction:
+                forwarded_msg = await client.forward_messages(target_channel, msg.id, channel)
+                bot.send_message(
+                    target_channel,
+                    f"Prediction: {prediction:.4f}",
+                    reply_to_message_id=forwarded_msg.id)
+    elif msg.message:
+        text = msg.message.strip()
+        if text:
+            prediction = predict_ad_content(text)
+            if prediction:
+                sent_msg = bot.send_message(target_channel, text)
+                bot.send_message(
+                    target_channel,
+                    f"Prediction: {prediction:.4f}",
+                    reply_to_message_id=sent_msg.message_id
+                )
+
+# ================================
+# Основной блок запуска
+# ================================
+
+def run_bot():
+    """Запуск Telebot в отдельном потоке."""
+    bot.polling(none_stop=True, interval=2)
 
 if __name__ == "__main__":
-    # Запуск Telebot в отдельном потоке
-    from threading import Thread
-
-    def run_bot():
-        bot.polling(none_stop=True, interval=2)
-
-    # Запуск asyncio-цикла в основном потоке
     Thread(target=run_bot).start()
 
     try:
