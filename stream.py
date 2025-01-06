@@ -76,14 +76,11 @@ def send_welcome(message):
 @bot.message_handler(content_types=["text"])
 def handle_message(message):
     """Обрабатывает текстовые сообщения пользователя."""
-    parts = message.text.split()
-
-    if len(parts) < 3:
-        bot.reply_to(message, "Неправильный формат. Нажми /start, чтобы увидеть правильный формат ввода.")
-        return
-
-    channel, num_posts, target_channel = parts[:3]
-    target_channel = "@" + target_channel
+    parts = message.text.split()    
+    channel, num_posts = parts[:2]
+    target_channel = parts[2] if len(parts) > 2 else None
+    target_channel = f"@{target_channel}" if target_channel else message.chat.id
+    logging.debug(f"Target channel: {target_channel}, type: {type(target_channel)}")
     update = 'update' in parts
 
     asyncio.run_coroutine_threadsafe(
@@ -156,27 +153,79 @@ async def handle_message_async(channel, num_posts, target_channel, message, upda
 
 async def process_message(msg, client, target_channel, channel):
     """Обработка каждого сообщения."""
-    if msg.photo or msg.video:
-        caption = msg.text
-        if caption:
-            prediction = predict_ad_content(caption)
-            if prediction:
-                forwarded_msg = await client.forward_messages(target_channel, msg.id, channel)
+    caption = msg.text or "No caption provided"  # Используем текст сообщения как подпись (если есть)
+    prediction = predict_ad_content(caption)
+
+    try:
+        if msg.photo or msg.video:
+            # Обработка медиа
+            if isinstance(target_channel, int):  # Проверяем, что target_channel - это ID чата
+                if msg.photo:
+                    sent_msg = bot.send_photo(
+                        chat_id=target_channel,
+                        photo=msg.photo[-1].file_id,  # Используем последний файл (наивысшее качество)
+                        caption=caption
+                    )
+                elif msg.video:
+                    sent_msg = bot.send_video(
+                        chat_id=target_channel,
+                        video=msg.video.file_id,
+                        caption=caption
+                    )
+
+                # Отправка результата предсказания
                 bot.send_message(
-                    target_channel,
-                    f"Prediction: {prediction:.4f}",
-                    reply_to_message_id=forwarded_msg.id)
-    elif msg.message:
-        text = msg.message.strip()
-        if text:
-            prediction = predict_ad_content(text)
-            if prediction <= 0.7:
-                sent_msg = bot.send_message(target_channel, text)
-                bot.send_message(
-                    target_channel,
-                    f"Prediction: {prediction:.4f}",
-                    reply_to_message_id=sent_msg.message_id
+                    chat_id=target_channel,
+                    text=f"Prediction: {prediction:.4f}",
+                    reply_to_message_id=sent_msg.id
                 )
+            else:  # Пересылка в канал
+                forwarded_msg = await client.forward_messages(
+                    target_channel,  # Канал
+                    msg.id,  # ID сообщения
+                    channel  # Откуда пересылаем
+                )
+                bot.send_message(
+                    chat_id=target_channel,
+                    text=f"Prediction: {prediction:.4f}",
+                    reply_to_message_id=forwarded_msg.id
+                )
+
+        elif msg.message:
+            # Обработка текстовых сообщений
+            text = msg.message.strip()
+            if text:
+                prediction = predict_ad_content(text)
+
+                if isinstance(target_channel, int):  # Отправка текста в чат с ботом
+                    sent_msg = bot.send_message(chat_id=target_channel, text=text)
+                    bot.send_message(
+                        chat_id=target_channel,
+                        text=f"Prediction: {prediction:.4f}",
+                        reply_to_message_id=sent_msg.id
+                    )
+                else:  # Пересылка текста в канал
+                    forwarded_msg = await client.forward_messages(
+                        target_channel,
+                        msg.id,
+                        channel
+                    )
+                    bot.send_message(
+                        chat_id=target_channel,
+                        text=f"Prediction: {prediction:.4f}",
+                        reply_to_message_id=forwarded_msg.id
+                    )
+        else:
+            logging.warning("Message contains no text, photo, or video. Skipping processing.")
+
+    except Exception as e:
+        logging.error(f"Error processing message: {e}")
+
+
+
+
+
+
 
 # ================================
 # Основной блок запуска
