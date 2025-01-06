@@ -14,3 +14,4 @@ pyproject.toml
 data/
 .env
 last_message_ids.json
+downloaded_media/
