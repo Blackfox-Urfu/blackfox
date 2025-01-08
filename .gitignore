@@ -14,3 +14,7 @@ pyproject.toml
 data/
 .env
 last_message_ids.json
+downloaded_media/
+backend/.env
+backend/anon.session
+frontend/node_modules
