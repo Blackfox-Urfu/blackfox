@@ -106,7 +106,7 @@ async def progress():
 
         # Отправка всех сообщений
         await websocket.send_json({"status": "done", "messages": result})
-        logging.info(f"Отправка сообщений клиенту завершена! Всего сообщений: {len(result)}")
+        logging.info(f"Отправка сообщений клиенту завершена! Посты: {result}")
 
     except Exception as e:
         logging.error(f"Ошибка в WebSocket: {e}")
