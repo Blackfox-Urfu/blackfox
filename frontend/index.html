@@ -46,13 +46,14 @@
         }
 
         .message-bubble {
-            background-color: #3a3f47; /* Темный фон для пузырьков сообщений */
             padding: 12px 18px;
             border-radius: 20px;
             max-width: 70%;
             word-wrap: break-word;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
             margin-bottom: 10px;
+            background-color: #6a1b9a; /* Фиолетовый цвет для всех сообщений */
+            color: white; /* Белый текст */
         }
 
         .sender-message-container {
@@ -201,21 +202,23 @@
 
                                 data.messages.forEach(message => {
                                     const messageElement = document.createElement("div");
-                                    messageElement.classList.add("message");
+                                    messageElement.classList.add("message-container");
 
-                                    const messageText = message.text || "No text";
+                                    const messageText = message.text || "";
                                     const mediaPath = message.media ? message.media.path : null;
 
                                     // Формирование HTML
                                     let mediaHTML = mediaPath 
-                                        ? `<p><strong>Media:</strong> <img src="${mediaPath}" alt="media" style="max-width: 300px;"></p>` 
-                                        : "<p><strong>Media:</strong> No media</p>";
+                                        ? `<p><img src="${mediaPath}" alt="media" style="max-width: 300px;"></p>` 
+                                        : "";
 
                                     messageElement.innerHTML = `
-                                        <p><strong>Message ID:</strong> ${message.id}</p>
-                                        <p><strong>Date:</strong> ${message.date}</p>
-                                        <p><strong>Text:</strong> ${messageText}</p>
-                                        ${mediaHTML}
+                                        <div class="message-bubble">
+                                            <p>${message.id}</p>
+                                            <p>${message.date}</p>
+                                            <p>${messageText}</p>
+                                            ${mediaHTML}
+                                        </div>
                                     `;
 
                                     chatView.appendChild(messageElement);
