@@ -4,36 +4,41 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>blackfox</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Poppins', sans-serif;
             margin: 0;
             padding: 0;
-            background-color: #181818; /* Темный фон для всего тела */
-            color: #e0e0e0; /* Светлый текст для контраста */
+            background-color: #181818;
+            color: #e0e0e0;
             transition: background-color 0.3s, color 0.3s;
         }
 
         .chat-container {
             display: flex;
             flex-direction: column;
-            height: 97vh; /* Высота контейнера чата */
+            height: 97vh;
             padding: 45px;
-            width: 70%; /* Увеличиваем ширину контейнера */
-            max-width: 1200px; /* Увеличиваем максимальную ширину */
+            max-width: 600px;
             margin: auto;
-            background-color: #2c2f36; /* Темный фон для контейнера */
+            background-color: #2c2f36;
             border-radius: 15px;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
-            margin-top: 20px; /* Отступ сверху */
-            margin-left: 220px; /* Сдвигаем контейнер вправо */
-            overflow: hidden; /* Прячем все, что выходит за пределы */
+            animation: fadeIn 0.5s ease-out;
+            position: relative;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
         h1 {
             text-align: center;
-            color: #f8f8f8; /* Светлый цвет заголовка */
+            color: #f8f8f8;
             margin-bottom: 20px;
+            font-size: 32px;
         }
 
         #chatView {
@@ -41,237 +46,248 @@
             overflow-y: auto;
             margin-top: 20px;
             padding: 10px;
-            width: 100%;
-            height: auto;
+            opacity: 0;
+            animation: fadeIn 1s ease-out forwards;
         }
 
         .message-container {
             display: flex;
-            justify-content: center; /* Центрируем сообщение по горизонтали */
+            align-items: flex-start;
             margin: 10px 0;
+            opacity: 0;
+            animation: fadeIn 0.5s ease-out forwards;
         }
 
         .message-bubble {
             padding: 12px 18px;
             border-radius: 20px;
-            max-width: 80%; /* Ограничиваем максимальную ширину */
+            max-width: 70%;
             word-wrap: break-word;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+            background-color: #6a1b9a;
+            color: white;
             margin-bottom: 10px;
-            background-color: #6a1b9a; /* Фиолетовый цвет для всех сообщений */
-            color: white; /* Белый текст */
-            text-align: center; /* Центрируем текст внутри сообщения */
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
         }
 
-        #channelInput, #numPostsInput {
-            padding: 8px 12px;
-            margin: 10px 0;
+        .sender-message-container {
+            justify-content: flex-end;
+        }
+
+        .sender-message-bubble {
+            background-color: #007bff;
+            color: white;
+        }
+
+        #formContainer {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: absolute;
+            top: 20px;
+            left: 20px;
+        }
+
+        #channelInput, #numPostsInput, #fetchButton {
+            padding: 6px 10px;
+            margin: 0;
             border-radius: 25px;
-            border: 1px solid #555; /* Темная рамка */
+            border: 1px solid #555;
             font-size: 14px;
-            width: 150px; /* Уменьшаем ширину полей */
-            background-color: #444; /* Темный фон для полей ввода */
-            color: #fff; /* Светлый цвет текста в полях */
+            width: 200px;
+            background-color: #444;
+            color: #fff;
+            transition: border-color 0.3s;
         }
 
         #fetchButton {
             background-color: #007bff;
             border-radius: 25px;
-            outline: none;
-            border: none;
-            padding: 12px 20px;
-            color: #fff;
-            font-size: 16px;
+            padding: 8px 12px;
+            font-size: 14px;
             cursor: pointer;
-            width: 150px; /* Уменьшаем ширину кнопки */
-            margin-top: 20px; /* Добавляем отступ сверху, чтобы кнопка была ниже поля */
+            border: none;
+            transition: background-color 0.3s, transform 0.3s;
         }
 
         #fetchButton:hover {
             background-color: #0056b3;
+            transform: translateY(-2px);
         }
 
         #progressContainer {
             display: none;
-            margin-top: 20px;
+            margin-top: 10px;
+            width: 200px;
+            text-align: left;
         }
+
 
         #progressText {
             margin-bottom: 5px;
-            color: #fff; /* Белый текст для прогресса */
+            color: #fff;
+            font-size: 14px;
         }
 
         progress {
             width: 100%;
             height: 20px;
-            background-color: #555; /* Темный фон прогресса */
+            background-color: #555;
         }
 
         progress[value] {
-            background-color: #444; /* Немного темнее фон для прогресса */
+            background-color: #444;
         }
 
-        /* Для изображений и видео в сообщениях */
         .message img, .message video {
-            max-width: 100%;  /* Ограничиваем максимальную ширину */
-            height: auto;  /* Сохраняем пропорции */
+            max-width: 100%;
             margin-top: 10px;
             border-radius: 10px;
-            object-fit: contain;  /* Сохраняем пропорции изображения, не обрезая */
-            box-sizing: border-box;  /* Чтобы не выходили за пределы контейнера */
         }
 
-        /* Для адаптивных изображений, которые хорошо масштабируются */
-        .message img {
-            max-width: 100%;
-            height: auto; /* Сохраняем пропорции */
-            display: block; /* Изображения становятся блочными элементами */
-            margin: 0 auto 15px; /* Выравнивание по центру и отступ снизу */
-        }
+        @media (max-width: 768px) {
+            .chat-container {
+                padding: 20px;
+                margin: 10px;
+            }
 
-        /* Контейнер для полей ввода */
-        .input-container {
-            position: fixed; /* Фиксируем контейнер с полями ввода */
-            top: 20px;
-            left: 20px; /* Поля на левом краю */
-            z-index: 10;
-            width: 200px; /* Ширина контейнера с полями */
-        }
+            h1 {
+                font-size: 24px;
+            }
 
-        .input-container label {
-            color: #ccc;
-            display: block;
-            margin-bottom: 5px;
-        }
+            #channelInput, #numPostsInput, #fetchButton {
+                font-size: 14px;
+                width: 150px;
+            }
 
-        /* Делаем все элементы внутри контейнера вертикально расположенными */
-        .input-container input,
-        .input-container button {
-            display: block;
-            margin-bottom: 15px; /* Добавляем отступ между полями */
-            width: 100%; /* Задаем ширину на 100% от контейнера */
+            #fetchButton {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="input-container">
-        <label for="channelInput">Введите канал:</label>
-        <input id="channelInput" type="text">
-        <label for="numPostsInput">Количество постов:</label>
-        <input id="numPostsInput" type="number" min="1" value="10">
-        <button id="fetchButton">Загрузить</button>
+    <div id="formContainer">
+        <label for="channelInput" style="color: #ccc;">Channel Name:</label>
+        <input id="channelInput" type="text" placeholder="Enter channel name">
+        <label for="numPostsInput" style="color: #ccc;">Number of Posts:</label>
+        <input id="numPostsInput" type="number" placeholder="Number of posts">
+        <button id="fetchButton">Fetch Messages</button>
+        
+        <div id="progressContainer" class="progress-bar-container">
+            <p id="progressText">Progress: 0%</p>
+            <progress id="progressBar" value="0" max="100"></progress>
+        </div>
     </div>
-
+    
     <div class="chat-container">
         <div id="chatView"></div>
     </div>
+    
 
-    <div id="progressContainer">
-        <p id="progressText" style="color: #fff;">Progress: 0%</p>
-        <progress id="progressBar" value="0" max="100" style="width: 100%;"></progress>
-    </div>
-
-    <!-- Подключение скрипта -->
     <script>
         console.log("renderer.js подключен и выполняется!");
-    
+
         document.getElementById('fetchButton').addEventListener('click', async () => {
             const channel = document.getElementById('channelInput').value.trim();
             const numPosts = parseInt(document.getElementById('numPostsInput').value);
-    
+
             // Проверка на пустые или некорректные значения
             if (!channel) {
                 alert('Please enter a channel name.');
                 return;
             }
-    
+
             if (!numPosts || numPosts <= 0) {
                 alert('Please enter a valid number of posts.');
                 return;
             }
-    
+
             console.log(`Запрос на канал: ${channel}, Количество постов: ${numPosts}`);
-    
+
             try {
                 // Установка WebSocket соединения
                 const ws = new WebSocket("ws://127.0.0.1:5000/progress");
-    
+
                 ws.onopen = () => {
                     console.log("WebSocket соединение открыто.");
                     // Отправка данных через WebSocket
                     ws.send(JSON.stringify({ channel: channel, num_posts: numPosts }));
                 };
-    
+
                 ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        console.log("Получено сообщение от сервера:", data);
-    
-                        // Обработка статусов
-                        switch (data.status) {
-                            case "in_progress":
-                                const progressContainer = document.getElementById("progressContainer");
-                                const progressBar = document.getElementById("progressBar");
-                                const progressText = document.getElementById("progressText");
-    
-                                progressContainer.style.display = "block";
-                                progressBar.value = data.progress;
-                                progressText.innerText = `Progress: ${data.progress.toFixed(2)}%`;
-                                break;
-    
-                            case "done":
-                                console.log("Загрузка завершена!");
-                                document.getElementById("progressText").innerText = "Загрузка завершена!";
-    
-                                const chatView = document.getElementById("chatView");
-                                chatView.innerHTML = ""; // Очищаем контейнер перед добавлением новых сообщений
-    
-                                // Группировка постов по полной дате и времени
-                                const groupedMessages = groupMessagesByDateAndTime(data.messages);
-    
-                                // Отображаем объединенные сообщения
-                                groupedMessages.forEach(group => {
-                                    const messageElement = document.createElement("div");
-                                    messageElement.classList.add("message-container");
-    
-                                    const messageText = group.text || "";
-                                    const mediaHTML = group.media.map(media => {
-                                        return `<p><img src="${media.path}" alt="media" style="max-width: 300px;"></p>`;
-                                    }).join('');
-    
-                                    messageElement.innerHTML = `
-                                        <div class="message-bubble">
-                                            <p>${group.date}</p>
-                                            <p>${messageText}</p>
-                                            ${mediaHTML}
-                                        </div>
-                                    `;
-    
-                                    chatView.appendChild(messageElement);
-                                });
-    
-                                ws.close();
-                                break;
-    
-                            case "error":
-                                console.error("Ошибка:", data.message);
-                                alert(`Ошибка: ${data.message}`);
-                                ws.close();
-                                break;
-    
-                            default:
-                                console.error("Неизвестный статус:", data.status);
-                        }
-                    } catch (error) {
-                        console.error("Ошибка при обработке данных от WebSocket:", error);
-                        alert("Произошла ошибка при получении данных. Пожалуйста, попробуйте снова.");
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log("Получено сообщение от сервера:", data);
+
+                    switch (data.status) {
+                        case "in_progress":
+                            const progressContainer = document.getElementById("progressContainer");
+                            const progressBar = document.getElementById("progressBar");
+                            const progressText = document.getElementById("progressText");
+
+                            progressContainer.style.display = "block";
+                            progressBar.value = data.progress;
+                            progressText.innerText = `Progress: ${data.progress.toFixed(2)}%`;
+                            break;
+
+                        case "done":
+                            console.log("Загрузка завершена!");
+                            document.getElementById("progressText").innerText = "Загрузка завершена!";
+
+                            const chatView = document.getElementById("chatView");
+                            chatView.innerHTML = ""; // Очищаем контейнер перед добавлением новых сообщений
+
+                            data.messages.forEach(message => {
+                                const messageElement = document.createElement("div");
+                                messageElement.classList.add("message-container");
+
+                                // Используем проверку наличия свойств для предотвращения undefined
+                                const timestamp = message.timestamp || "Неизвестное время";
+                                const messageText = message.text || "Нет текста";
+                                const mediaHTML = (message.media && message.media.length > 0)
+                                    ? message.media.map(media => {
+                                        if (media.type === "photo" || media.type === "document") {
+                                            return `<p><img src="${media.path}" alt="media" style="max-width: 300px;"></p>`;
+                                        }
+                                        return "";
+                                    }).join("")
+                                    : "";
+
+                                messageElement.innerHTML = `
+                                    <div class="message-bubble">
+                                        <p><b>Время:</b> ${timestamp}</p>
+                                        <p>${messageText}</p>
+                                        ${mediaHTML}
+                                    </div>
+                                `;
+
+                                chatView.appendChild(messageElement);
+                            });
+
+                            ws.close();
+                            break;
+
+                        case "error":
+                            console.error("Ошибка:", data.message);
+                            alert(`Ошибка: ${data.message}`);
+                            ws.close();
+                            break;
+
+                        default:
+                            console.error("Неизвестный статус:", data.status);
                     }
-                };
-    
+                } catch (error) {
+                    console.error("Ошибка при обработке данных от WebSocket:", error);
+                    alert("Произошла ошибка при получении данных. Пожалуйста, попробуйте снова.");
+                }
+            };
+
+
                 ws.onclose = () => {
                     console.log("WebSocket соединение закрыто.");
                 };
-    
+
                 ws.onerror = (error) => {
                     console.error("Ошибка WebSocket:", error);
                     alert('Произошла ошибка WebSocket. Проверьте подключение к серверу.');
@@ -281,35 +297,6 @@
                 alert('Ошибка при запросе данных. Пожалуйста, попробуйте снова.');
             }
         });
-    
-        // Функция для группировки сообщений по полной дате и времени
-        function groupMessagesByDateAndTime(messages) {
-            const groups = {};
-    
-            messages.forEach(message => {
-                const messageDateTime = message.date; // Используем полную дату и время
-    
-                if (!groups[messageDateTime]) {
-                    groups[messageDateTime] = {
-                        date: messageDateTime,
-                        text: message.text,
-                        media: []
-                    };
-                }
-    
-                if (message.text) {
-                    groups[messageDateTime].text = message.text; // Обновляем текст для группы
-                }
-    
-                if (message.media) {
-                    groups[messageDateTime].media.push(message.media); // Добавляем медиафайл в группу
-                }
-            });
-    
-            return Object.values(groups); // Преобразуем объект в массив
-        }
     </script>
-    
-    
 </body>
 </html>

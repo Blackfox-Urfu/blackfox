@@ -5,6 +5,8 @@ import asyncio
 import os
 from dotenv import load_dotenv
 import logging
+import hashlib
+from collections import defaultdict
 
 # Настройка логирования
 logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
@@ -45,9 +47,20 @@ async def shutdown():
     await client.disconnect()
     logging.info("TelegramClient успешно остановлен!")
 
+
+
+def file_exists(file_path):
+    """Проверяет, существует ли файл по указанному пути."""
+    return os.path.exists(file_path)
+
+def generate_unique_filename(media):
+    """Генерирует уникальное имя файла на основе хэша."""
+    media_hash = hashlib.sha256(str(media).encode()).hexdigest()
+    return media_hash
+
+
 @app.websocket('/progress')
 async def progress():
-    """WebSocket для отправки прогресса загрузки и сообщений."""
     try:
         data = await websocket.receive_json()
         logging.info(f"Получена команда от клиента: {data}")
@@ -70,52 +83,54 @@ async def progress():
             return
 
         total_messages = len(messages)
-        result = []
+        grouped_messages = defaultdict(list)
 
-        for idx, msg in enumerate(messages, start=1):
-            media_info = None
-            if msg.media:
-                if isinstance(msg.media, MessageMediaPhoto):
-                    downloaded_path = await client.download_media(msg.media, MEDIA_DIR)
-                    if downloaded_path:
-                        filename = os.path.basename(downloaded_path)
-                        media_info = {
-                            "type": "photo",
-                            "path": f"/media/{filename}"  # Относительный путь для клиента
-                        }
-                elif isinstance(msg.media, MessageMediaDocument):
-                    downloaded_path = await client.download_media(msg.media, MEDIA_DIR)
-                    if downloaded_path:
-                        filename = os.path.basename(downloaded_path)
-                        media_info = {
-                            "type": "document",
-                            "path": f"/media/{filename}"  # Относительный путь для клиента
-                        }
+        # Группировка сообщений по `datetime`
+        for msg in messages:
+            key = msg.date.replace(microsecond=0) if msg.date else None
+            grouped_messages[key].append(msg)
+
+        result = []
+        for idx, (timestamp, group) in enumerate(grouped_messages.items(), start=1):
+            combined_text = "\n\n".join(
+                [msg.message or "" for msg in group if msg.message]
+            )
+            media_info = []
+
+            for msg in group:
+                if msg.media:
+                    if isinstance(msg.media, MessageMediaPhoto) or isinstance(msg.media, MessageMediaDocument):
+                        downloaded_path = await client.download_media(msg.media, MEDIA_DIR)
+                        if downloaded_path:
+                            filename = os.path.basename(downloaded_path)
+                            media_info.append({
+                                "type": "photo" if isinstance(msg.media, MessageMediaPhoto) else "document",
+                                "path": f"/media/{filename}"
+                            })
 
             result.append({
-                "id": msg.id,
-                "text": msg.message or "",  # Обеспечиваем наличие строки
-                "date": msg.date.strftime('%Y-%m-%d %H:%M:%S') if msg.date else None,
-                "media": media_info
+                "timestamp": timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else None,
+                "text": combined_text,
+                "media": media_info,
             })
 
             # Прогресс обработки
-            progress = (idx / total_messages) * 100
+            progress = (idx / len(grouped_messages)) * 100
             await websocket.send_json({"status": "in_progress", "progress": progress})
-            logging.info(f"Сообщение отправлено: {msg.id} Прогресс: {progress:.2f}%")
+            logging.info(f"Прогресс: {progress:.2f}%")
 
-        # Отправка всех сообщений
+        # Отправка результата
         await websocket.send_json({"status": "done", "messages": result})
-        logging.info(f"Отправка сообщений клиенту завершена! Посты: {result}")
+        logging.info("Группировка сообщений завершена.")
 
     except Exception as e:
         logging.error(f"Ошибка в WebSocket: {e}")
-        await websocket.send_json({"status": "error", "message": f"Internal server error: {str(e)}"})
-    
+        await websocket.send_json({"status": "error", "message": str(e)})
     finally:
-        # Явное закрытие WebSocket-соединения
         await websocket.close(1000)
         logging.info("WebSocket соединение закрыто.")
+
+
 
 @app.route('/media/<path:filename>')
 async def media(filename):
