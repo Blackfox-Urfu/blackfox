@@ -140,8 +140,12 @@
 
         .message img, .message video {
             max-width: 100%;
+            max-width: 100%;  /* Ограничиваем максимальную ширину */
+            height: auto;  /* Сохраняем пропорции */
             margin-top: 10px;
             border-radius: 10px;
+            object-fit: contain;  /* Сохраняем пропорции изображения, не обрезая */
+            box-sizing: border-box;  /* Чтобы не выходили за пределы контейнера */
         }
 
         @media (max-width: 768px) {
@@ -186,7 +190,6 @@
     
 
     <script>
-        console.log("renderer.js подключен и выполняется!");
 
         document.getElementById('fetchButton').addEventListener('click', async () => {
             const channel = document.getElementById('channelInput').value.trim();
@@ -250,9 +253,13 @@
                                         if (media.type === "photo" || media.type === "document") {
                                             return `<p><img src="${media.path}" alt="media" style="max-width: 300px;"></p>`;
                                         }
+                                        if (media.type === "video" ) {
+                                            return `<p><video src="${media.path}" controls></video></p>`;
+                                        }
                                         return "";
                                     }).join("")
                                     : "";
+
 
                                 messageElement.innerHTML = `
                                     <div class="message-bubble">

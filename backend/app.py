@@ -40,6 +40,7 @@ async def startup():
     await client.start()
     logging.info("TelegramClient успешно запущен!")
 
+
 @app.after_serving
 async def shutdown():
     """Закрытие клиента Telethon после завершения работы сервера."""
@@ -47,17 +48,29 @@ async def shutdown():
     await client.disconnect()
     logging.info("TelegramClient успешно остановлен!")
 
+def clear_media_directory():
+    """Очищает папку с медиафайлами."""
+    for filename in os.listdir(MEDIA_DIR):
+        file_path = os.path.join(MEDIA_DIR, filename)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+                logging.info(f"Удален файл: {filename}")
+            elif os.path.isdir(file_path):
+                os.rmdir(file_path)  # Если это папка, то удалить ее (если она пустая)
+        except Exception as e:
+            logging.error(f"Ошибка при удалении файла {filename}: {e}")
 
 
+
+# Нужно определять что файлы уже скачаны по последнему id поста канала 
 def file_exists(file_path):
     """Проверяет, существует ли файл по указанному пути."""
     return os.path.exists(file_path)
 
-def generate_unique_filename(media):
-    """Генерирует уникальное имя файла на основе хэша."""
-    media_hash = hashlib.sha256(str(media).encode()).hexdigest()
-    return media_hash
-
+def generate_unique_filename(channel, msg_id):
+    """Генерирует уникальное имя файла на основе канала и ID сообщения."""
+    return f"{channel}_{msg_id}"
 
 @app.websocket('/progress')
 async def progress():
@@ -100,7 +113,15 @@ async def progress():
             for msg in group:
                 if msg.media:
                     if isinstance(msg.media, MessageMediaPhoto) or isinstance(msg.media, MessageMediaDocument):
-                        downloaded_path = await client.download_media(msg.media, MEDIA_DIR)
+                        # Генерация уникального имени файла с учётом канала и ID сообщения
+                        unique_filename = os.path.join(MEDIA_DIR, generate_unique_filename(channel, msg.id))
+                        
+                        # Если файл не существует, загружаем его
+                        if not file_exists(unique_filename):
+                            downloaded_path = await client.download_media(msg.media, unique_filename)
+                        else:
+                            downloaded_path = unique_filename  # Используем уже существующий файл
+
                         if downloaded_path:
                             filename = os.path.basename(downloaded_path)
                             media_info.append({
@@ -192,7 +213,6 @@ async def fetch_messages():
         logging.info(f"Сообщений отправлено клиенту: {len(result)}")
         logging.info(f"Возвращаемые данные: {result}")
         return jsonify(result), 200
-        logging.info(f"Маршрут /fetch_messages выполнен успешно! result {result}")
     except Exception as e:
         logging.error(f"Ошибка в маршруте /fetch_messages: {e}")
         return jsonify({"error": str(e)}), 500
