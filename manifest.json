@@ -1,0 +1,18 @@
+{
+    "manifest_version": 3,
+    "name": "Telegram Ad Blocker",
+    "version": "1.0",
+    "description": "Filters ads in Telegram Web.",
+    "permissions": ["activeTab", "scripting", "storage"],
+    "host_permissions": ["https://web.telegram.org/*"],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["https://web.telegram.org/k/*"],
+        "js": ["content.js"]
+      }
+    ]
+  }
+  
