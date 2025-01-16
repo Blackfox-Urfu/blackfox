@@ -1,6 +1,6 @@
-// Выбираем сообщения на странице
+// Функция для выбора сообщений на странице
 function getMessages() {
-    // Используем точный селектор
+    // Используем точный селектор для получения всех сообщений
     const messages = document.querySelectorAll("div.bubble-content > div.message > span.translatable-message");
     return Array.from(messages).map(msg => ({
         element: msg,
@@ -8,48 +8,60 @@ function getMessages() {
     }));
 }
 
-// Отправляем сообщения для классификации
+// Функция для классификации сообщений
 async function classifyMessages(messages) {
     for (const msg of messages) {
         try {
+            console.log("Отправляем на классификацию:", msg.text); // Лог перед отправкой
+
             const response = await chrome.runtime.sendMessage({
                 action: "classify",
                 text: msg.text,
             });
-            
-            // Проверяем наличие ошибки в ответе
+
+            console.log("Получен ответ:", response); // Лог полученного ответа
+
+            if (!response || typeof response !== "object") {
+                console.error("Некорректный ответ от API:", response, "Текст сообщения:", msg.text);
+                continue;
+            }
+
             if (response.error) {
                 console.error("Ошибка от API:", response.error);
                 continue;
             }
-            // Если сообщение реклама, выделяем его
+
             if (response.is_ad) {
                 const messageContainer = msg.element.closest("div.bubble-content");
-
-                // Выделяем рекламное сообщение (например, меняем фон)
-                messageContainer.style.backgroundColor = "#ffcccb"; // Красный фон для выделения
-                messageContainer.style.border = "2px solid #ff0000"; // Красная рамка
+                messageContainer.style.backgroundColor = "#ffcccb";
+                messageContainer.style.border = "2px solid #ff0000";
             }
 
-            // Добавляем значение prediction в сообщение
             const predictionText = response.prediction || "Не классифицировано";
             const predictionElement = document.createElement("div");
             predictionElement.style.fontSize = "12px";
-            predictionElement.style.color = "#888";  // Серый цвет
+            predictionElement.style.color = "#888";
             predictionElement.style.marginTop = "5px";
             predictionElement.textContent = `Prediction: ${predictionText}`;
 
-            // Добавляем блок с prediction после текста сообщения
             msg.element.appendChild(predictionElement);
 
         } catch (error) {
-            console.error("Ошибка при классификации сообщения:", error);
+            console.error("Ошибка при классификации сообщения:", error, "Текст сообщения:", msg.text);
         }
     }
 }
 
-// Обновляем фильтрацию при загрузке страницы
-setInterval(() => {
-    const messages = getMessages();
-    classifyMessages(messages);
-}, 3000);
+
+
+// Функция для обновления сообщений
+function updateMessages() {
+    const messages = getMessages(); // Получаем все сообщения
+    classifyMessages(messages); // Отправляем их на классификацию
+}
+
+// Запускаем обновление сообщений каждые 3 секунды
+setInterval(updateMessages, 3000);
+
+// Лог для проверки загрузки скрипта
+console.log("Скрипт content.js загружен и работает.");
