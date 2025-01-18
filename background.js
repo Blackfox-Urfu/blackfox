@@ -8,7 +8,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             body: JSON.stringify({ text: request.text }),
         })
         .then(response => {
+            console.log("Полчен ответ http:", response);
             if (!response.ok) {
+                console.log("!response.ok now")
                 throw new Error(`HTTP error! Status: ${response.status}`);
             }
             return response.json();
@@ -18,7 +20,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse(result);
         })
         .catch(error => {
-            console.error("Ошибка при классификации:", error);
+            console.error("Ошибка при отправке ответа:", error);
             sendResponse({ is_ad: false, error: error.message || "Unknown error" });
         });
 

@@ -1,11 +1,16 @@
+// Множество для хранения уже обработанных сообщений
+const processedMessages = new Set();
+
 // Функция для выбора сообщений на странице
 function getMessages() {
     // Используем точный селектор для получения всех сообщений
     const messages = document.querySelectorAll("div.bubble-content > div.message > span.translatable-message");
-    return Array.from(messages).map(msg => ({
-        element: msg,
-        text: msg.textContent.trim(),
-    }));
+    return Array.from(messages)
+        .filter(msg => !processedMessages.has(msg)) // Фильтруем только необработанные сообщения
+        .map(msg => ({
+            element: msg,
+            text: msg.textContent.trim(),
+        }));
 }
 
 // Функция для классификации сообщений
@@ -19,7 +24,7 @@ async function classifyMessages(messages) {
                 text: msg.text,
             });
 
-            console.log("Получен ответ:", response); // Лог полученного ответа
+            console.log(`[${new Date().toISOString()}] Получен ответ:`, response);
 
             if (!response || typeof response !== "object") {
                 console.error("Некорректный ответ от API:", response, "Текст сообщения:", msg.text);
@@ -46,22 +51,24 @@ async function classifyMessages(messages) {
 
             msg.element.appendChild(predictionElement);
 
+            // Добавляем сообщение в множество обработанных
+            processedMessages.add(msg.element);
+
         } catch (error) {
             console.error("Ошибка при классификации сообщения:", error, "Текст сообщения:", msg.text);
         }
     }
 }
 
-
-
-// Функция для обновления сообщений
-function updateMessages() {
-    const messages = getMessages(); // Получаем все сообщения
-    classifyMessages(messages); // Отправляем их на классификацию
+// Функция для обработки новых сообщений
+function processNewMessages() {
+    const messages = getMessages(); // Получаем только необработанные сообщения
+    if (messages.length > 0) {
+        classifyMessages(messages);
+    }
 }
 
-// Запускаем обновление сообщений каждые 3 секунды
-setInterval(updateMessages, 3000);
+// Запускаем проверку новых сообщений раз в 3 секунды
+setInterval(processNewMessages, 3000);
 
-// Лог для проверки загрузки скрипта
 console.log("Скрипт content.js загружен и работает.");
