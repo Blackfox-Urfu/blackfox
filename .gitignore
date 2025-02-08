@@ -19,3 +19,7 @@ backend/.env
 backend/anon.session
 frontend/node_modules/
 frontend/static/
+session_name.session
+session_name.session-journal
+randfor_model.pkl
+randfor_vectorizer.pkl
