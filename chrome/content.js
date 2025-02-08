@@ -119,10 +119,17 @@ async function classifyMessages(messages) {
                 messageContainer.style.border = "2px solid #ff0000";
             }
 
+            // Проверка, есть ли уже prediction в элементе
+            if (msg.element.querySelector(".prediction")) {
+                console.log("Предсказание уже добавлено для этого сообщения.");
+                continue;
+            }
+
             const predictionElement = document.createElement("div");
             predictionElement.style.fontSize = "12px";
             predictionElement.style.color = "#888";
             predictionElement.style.marginTop = "5px";
+            predictionElement.classList.add("prediction"); // Добавляем класс для удобства поиска
             predictionElement.textContent = `Prediction: ${response.prediction || "Не классифицировано"}`;
             msg.element.appendChild(predictionElement);
 
@@ -132,6 +139,7 @@ async function classifyMessages(messages) {
         }
     }
 }
+
 
 function cleanProcessedMessages() {
     if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
