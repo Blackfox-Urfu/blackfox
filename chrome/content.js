@@ -3,16 +3,35 @@ const processedMessages = new Set();
 const MAX_PROCESSED_MESSAGES = 500; // Ограничение на количество записей
 
 let excludedChannels = [];
+let displayMode = 'highlight'; // Значение по умолчанию
+let threshold = 0.5; // Значение по умолчанию
 
-// Загружаем настройки фильтрации из хранилища
-function updateExcludedChannels() {
-    chrome.storage.local.get(['excludedChannels'], (data) => {
+// Загружаем настройки из хранилища
+function updateSettings() {
+    chrome.storage.local.get(['excludedChannels', 'displayMode', 'threshold'], (data) => {
         excludedChannels = (data.excludedChannels || []).map(url => url.split('@').pop());
-        console.log('Список каналов для обработки обновлен:', excludedChannels);
-        updateExcludeButton(); // Обновляем кнопку при изменении списка
+        displayMode = data.displayMode || 'highlight';
+        threshold = data.threshold || 0.5;
+        console.log('Настройки обновлены:', { excludedChannels, displayMode, threshold });
+        updateExcludeButton();
     });
 }
-updateExcludedChannels(); // Загружаем настройки при запуске
+
+// Слушаем изменения в настройках
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.excludedChannels) {
+        excludedChannels = changes.excludedChannels.newValue.map(url => url.split('@').pop());
+    }
+    if (changes.displayMode) {
+        displayMode = changes.displayMode.newValue;
+    }
+    if (changes.threshold) {
+        threshold = changes.threshold.newValue;
+    }
+    console.log('Настройки изменены:', { excludedChannels, displayMode, threshold });
+});
+
+updateSettings(); // Загружаем настройки при запуске
 
 function getChannelName() {
     if (typeof document === "undefined") return "";
@@ -94,6 +113,35 @@ function getMessages() {
         }));
 }
 
+// Применение стилей в зависимости от режима отображения
+function applyAdStyle(messageContainer, predictionValue) {
+    // Сначала сбрасываем все возможные стили
+    messageContainer.style.backgroundColor = '';
+    messageContainer.style.border = '';
+    messageContainer.style.opacity = '';
+    messageContainer.style.display = '';
+
+    if (predictionValue < threshold) {
+        return; // Если значение ниже порога, не применяем стили
+    }
+
+    switch (displayMode) {
+        case 'highlight':
+            messageContainer.style.backgroundColor = '#ffcccb';
+            messageContainer.style.border = '2px solid #ff0000';
+            break;
+        case 'hide':
+            messageContainer.style.display = 'none';
+            break;
+        case 'partial':
+            messageContainer.style.opacity = '0.5';
+            break;
+        case 'prediction':
+            // Ничего не делаем с контейнером, только показываем предсказание
+            break;
+    }
+}
+
 async function classifyMessages(messages) {
     for (const msg of messages) {
         try {
@@ -113,25 +161,34 @@ async function classifyMessages(messages) {
                 continue;
             }
 
+            const messageContainer = msg.element.closest("div.bubble-content");
+            
+            // Применяем стили в зависимости от настроек
             if (response.is_ad) {
-                const messageContainer = msg.element.closest("div.bubble-content");
-                messageContainer.style.backgroundColor = "#ffcccb";
-                messageContainer.style.border = "2px solid #ff0000";
+                applyAdStyle(messageContainer, response.prediction || 0);
             }
 
-            // Проверка, есть ли уже prediction в элементе
-            if (msg.element.querySelector(".prediction")) {
-                console.log("Предсказание уже добавлено для этого сообщения.");
-                continue;
-            }
+            // Добавляем предсказание, если его еще нет
+            if (!msg.element.querySelector(".prediction")) {
+                const predictionElement = document.createElement("div");
+                predictionElement.style.fontSize = "12px";
+                predictionElement.style.color = "#888";
+                predictionElement.style.marginTop = "5px";
+                predictionElement.classList.add("prediction");
+                
+                // Форматируем значение предсказания
+                const predictionValue = response.prediction || 0;
+                const formattedPrediction = (predictionValue * 100).toFixed(1) + '%';
+                predictionElement.textContent = `Вероятность рекламы: ${formattedPrediction}`;
+                
+                // Добавляем цветовую индикацию для prediction
+                if (predictionValue >= threshold) {
+                    predictionElement.style.color = '#ff4444';
+                    predictionElement.style.fontWeight = 'bold';
+                }
 
-            const predictionElement = document.createElement("div");
-            predictionElement.style.fontSize = "12px";
-            predictionElement.style.color = "#888";
-            predictionElement.style.marginTop = "5px";
-            predictionElement.classList.add("prediction"); // Добавляем класс для удобства поиска
-            predictionElement.textContent = `Prediction: ${response.prediction || "Не классифицировано"}`;
-            msg.element.appendChild(predictionElement);
+                msg.element.appendChild(predictionElement);
+            }
 
             processedMessages.add(msg.element);
         } catch (error) {
@@ -139,7 +196,6 @@ async function classifyMessages(messages) {
         }
     }
 }
-
 
 function cleanProcessedMessages() {
     if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
@@ -149,7 +205,7 @@ function cleanProcessedMessages() {
 }
 
 function processNewMessages() {
-    updateExcludedChannels(); // Обновляем список исключений перед проверкой
+    updateSettings(); // Обновляем список исключений перед проверкой
     const messages = getMessages();
     if (messages.length > 0) {
         console.log(`Найдено ${messages.length} новых сообщений.`);
@@ -158,5 +214,6 @@ function processNewMessages() {
     cleanProcessedMessages(); // Очищаем список обработанных сообщений при необходимости
 }
 
-setInterval(processNewMessages, 3000);
-console.log("Скрипт content.js загружен и работает.");
+// Обновляем интервал проверки
+const checkInterval = setInterval(processNewMessages, 3000);
+console.log("Скрипт content.js загружен и работает с новыми настройками.");
