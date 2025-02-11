@@ -196,3 +196,25 @@ select:focus {
 .fade-in {
     animation: fadeIn 0.5s ease-out forwards;
 }
+
+.import-export-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.action-btn {
+    background: var(--secondary-color);
+    color: #fff;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: var(--transition);
+    border: none;
+    font-size: 14px;
+}
+
+.action-btn:hover {
+    background: #2980b9;
+    transform: translateY(-2px);
+}

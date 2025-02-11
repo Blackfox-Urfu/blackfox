@@ -5,6 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const displayMode = document.getElementById('displayMode');
   const thresholdSlider = document.getElementById('thresholdSlider');
   const thresholdInput = document.getElementById('thresholdInput');
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importFile = document.getElementById('importFile');
 
   if (!channelSearch || !addButton || !channelList) {
       console.error("Ошибка: не найдены элементы интерфейса в popup.html.");
@@ -97,6 +100,56 @@ document.addEventListener('DOMContentLoaded', () => {
           const channels = data.excludedChannels || [];
           updateChannelList(channels, e.target.value);
       });
+  });
+
+  // Функция экспорта списка каналов
+  exportBtn.addEventListener('click', () => {
+      chrome.storage.local.get(['excludedChannels'], (data) => {
+          const channels = data.excludedChannels || [];
+          const blob = new Blob([JSON.stringify(channels, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'telegram_ad_blocker_channels.json';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+      });
+  });
+
+  // Обработчик кнопки импорта
+  importBtn.addEventListener('click', () => {
+      importFile.click();
+  });
+
+  // Функция импорта списка каналов
+  importFile.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              try {
+                  const channels = JSON.parse(e.target.result);
+                  if (Array.isArray(channels)) {
+                      // Подтверждение импорта
+                      if (confirm(`Импортировать ${channels.length} каналов? Текущий список будет заменен.`)) {
+                          chrome.storage.local.set({ excludedChannels: channels }, () => {
+                              loadSettings();
+                              alert('Список каналов успешно импортирован!');
+                          });
+                      }
+                  } else {
+                      alert('Неверный формат файла!');
+                  }
+              } catch (error) {
+                  alert('Ошибка при чтении файла!');
+                  console.error('Ошибка импорта:', error);
+              }
+          };
+          reader.readAsText(file);
+      }
   });
 
   loadSettings();
