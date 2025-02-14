@@ -13,3 +13,4 @@ anon.session
 pyproject.toml
 data/
 .env
+results/

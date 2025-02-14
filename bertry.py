@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from nltk.corpus import stopwords
 import nltk
 import optuna
+import joblib
 
 # Загрузка данных
 def load_data(filepath):
@@ -62,12 +63,14 @@ class TextDataset(Dataset):
         text = str(self.texts[item])
         label = self.labels[item]
 
+        # Токенизация текста с фиксированной длиной
         encoding = self.tokenizer.encode_plus(
             text,
             add_special_tokens=True,
             max_length=self.max_len,
+            padding='max_length',  # Дополнение до max_len
+            truncation=True,       # Усечение до max_len
             return_token_type_ids=False,
-            padding='max_length',
             return_attention_mask=True,
             return_tensors='pt',
         )
@@ -142,9 +145,16 @@ def main():
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2)
 
+    # Перенос модели на GPU, если доступно
+    if torch.cuda.is_available():
+        print("CUDA is available. Using GPU:", torch.cuda.get_device_name(0))
+        model = model.to('cuda')
+    else:
+        print("CUDA is not available. Using CPU.")
+
     # Создание датасетов
-    train_dataset = TextDataset(train_texts, train_labels, tokenizer, max_len=512)
-    test_dataset = TextDataset(test_texts, test_labels, tokenizer, max_len=512)
+    train_dataset = TextDataset(train_texts, train_labels, tokenizer, max_len=128)
+    test_dataset = TextDataset(test_texts, test_labels, tokenizer, max_len=128)
 
     # Использование DataCollatorWithPadding
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -153,6 +163,15 @@ def main():
     study = optuna.create_study(direction='maximize')
     study.optimize(lambda trial: optimize_bert(trial, model, train_dataset, test_dataset, data_collator), n_trials=10)
     print("Best parameters:", study.best_params)
+
+    # Финальное обучение модели с лучшими гиперпараметрами
+    best_model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2)
+    best_model.load_state_dict(model.state_dict())
+
+    # Сохранение модели и токенизатора
+    joblib.dump(best_model, 'bert_best_model.pkl')
+    joblib.dump(tokenizer, 'bert_tokenizer.pkl')
+    print('Best model and tokenizer saved to disk.')
 
 if __name__ == "__main__":
     nltk.download('stopwords')
