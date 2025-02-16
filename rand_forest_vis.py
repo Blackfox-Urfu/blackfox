@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 from sklearn.tree import plot_tree
 import joblib
+import csv
+from sklearn.ensemble import RandomForestClassifier
 
 # Загрузка модели и векторизатора
 rf_model = joblib.load('randfor_best_model.pkl')
@@ -32,5 +34,36 @@ plt.savefig(
     format="svg",
     dpi=600
 )
+
+# Открытие CSV-файла для записи
+with open('random_forest_structure.csv', mode='w', newline='', encoding='utf-8') as file:
+    writer = csv.writer(file)
+    # Запись заголовков
+    writer.writerow(['Tree Index', 'Node Index', 'Feature', 'Threshold', 'Left Child', 'Right Child', 'Impurity', 'Samples'])
+
+    # Итерация по всем деревьям в случайном лесе
+    for tree_index, tree in enumerate(rf_model.estimators_):
+        tree_ = tree.tree_
+        for node_index in range(tree_.node_count):
+            feature = tree_.feature[node_index]
+            threshold = tree_.threshold[node_index]
+            left_child = tree_.children_left[node_index]
+            right_child = tree_.children_right[node_index]
+            impurity = tree_.impurity[node_index]
+            samples = tree_.n_node_samples[node_index]
+
+            # Запись информации о каждом узле
+            writer.writerow([
+                tree_index,
+                node_index,
+                feature,
+                threshold,
+                left_child,
+                right_child,
+                impurity,
+                samples
+            ])
+
+print("Structure of all trees in the random forest has been saved to 'random_forest_structure.csv'.")
 
 
