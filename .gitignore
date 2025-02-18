@@ -23,3 +23,6 @@ session_name.session
 session_name.session-journal
 randfor_model.pkl
 randfor_vectorizer.pkl
+results/
+bert_best_model.pkl
+bert_tokenizer.pkl
