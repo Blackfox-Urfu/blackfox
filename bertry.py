@@ -97,39 +97,58 @@ def compute_metrics(pred):
 
 # Функция для оптимизации гиперпараметров
 def optimize_bert(trial, model, train_dataset, test_dataset, data_collator):
-    # Гиперпараметры для оптимизации
-    learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-5, log=True)
-    num_train_epochs = trial.suggest_int('num_train_epochs', 2, 5)
+    # Гиперпараметры
+    learning_rate = trial.suggest_float('learning_rate', 1e-6, 5e-4, log=True)
+    num_train_epochs = trial.suggest_int('num_train_epochs', 2, 10)
+    weight_decay = trial.suggest_float('weight_decay', 0.0, 0.1)
+    warmup_steps = trial.suggest_int('warmup_steps', 0, 1000)
+    batch_size = trial.suggest_categorical('per_device_train_batch_size', [8, 16, 32])
+    eval_batch_size = trial.suggest_categorical('per_device_eval_batch_size', [16, 32, 64])
+    optimizer = trial.suggest_categorical('optimizer', ['adamw_hf', 'adamw_torch', 'sgd', 'adafactor'])
+    scheduler_type = trial.suggest_categorical('scheduler_type', ['linear', 'cosine', 'cosine_with_restarts'])
+    dropout = trial.suggest_float('dropout', 0.1, 0.5)
+    gradient_accumulation_steps = trial.suggest_int('gradient_accumulation_steps', 1, 8)
+    hidden_dropout_prob = trial.suggest_float('hidden_dropout_prob', 0.1, 0.3)
+    attention_probs_dropout_prob = trial.suggest_float('attention_probs_dropout_prob', 0.1, 0.3)
+    freeze_layers = trial.suggest_int('freeze_layers', 0, 9)
 
-    # Настройка тренера
     training_args = TrainingArguments(
         output_dir='./results',
         num_train_epochs=num_train_epochs,
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=64,
-        warmup_steps=500,
-        weight_decay=0.01,
-        logging_dir='./logs',
-        logging_steps=10,
+        per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=eval_batch_size,
+        warmup_steps=warmup_steps,
+        weight_decay=weight_decay,
+        learning_rate=learning_rate,
+        optim=optimizer,
+        lr_scheduler_type=scheduler_type,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         eval_strategy="epoch",
-        learning_rate=learning_rate
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
     )
+
+    # Заморозка первых слоев модели
+    for param in model.bert.encoder.layer[:freeze_layers]:
+        for p in param.parameters():
+            p.requires_grad = False
 
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=test_dataset,
-        compute_metrics=compute_metrics,
-        data_collator=data_collator
+        data_collator=data_collator,
+        compute_metrics=compute_metrics
     )
 
-    # Обучение модели
     trainer.train()
+    metrics = trainer.evaluate()
+    
+    # Возвращаем значение accuracy
+    return metrics['eval_accuracy']
 
-    # Оценка модели
-    eval_result = trainer.evaluate()
-    return eval_result['eval_accuracy']
 
 # Основная функция
 def main():
@@ -161,7 +180,7 @@ def main():
 
     # Оптимизация гиперпараметров
     study = optuna.create_study(direction='maximize')
-    study.optimize(lambda trial: optimize_bert(trial, model, train_dataset, test_dataset, data_collator), n_trials=10)
+    study.optimize(lambda trial: optimize_bert(trial, model, train_dataset, test_dataset, data_collator), n_trials=60)
     print("Best parameters:", study.best_params)
 
     # Финальное обучение модели с лучшими гиперпараметрами
