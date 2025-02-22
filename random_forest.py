@@ -8,6 +8,9 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import RandomOverSampler
+from imblearn.combine import SMOTETomek
 import joblib
 import optuna
 from datetime import datetime
@@ -118,6 +121,95 @@ def dataset_statistics(texts, labels):
         print(f"\nClass imbalance ratio: {imbalance_ratio:.2f}")
         print()
 
+def balance_dataset(train_vectors, train_labels, method='combined'):
+    """
+    Балансировка датасета различными методами
+    """
+    print("Initial class distribution:", Counter(train_labels))
+    
+    if method == 'under':
+        sampler = RandomUnderSampler(random_state=42)
+        train_vectors_balanced, train_labels_balanced = sampler.fit_resample(
+            train_vectors, train_labels
+        )
+    
+    elif method == 'over':
+        sampler = RandomOverSampler(random_state=42)
+        train_vectors_balanced, train_labels_balanced = sampler.fit_resample(
+            train_vectors, train_labels
+        )
+    
+    elif method == 'combined':
+        # Находим соотношение классов
+        class_counts = Counter(train_labels)
+        minority_class = min(class_counts, key=class_counts.get)
+        majority_class = max(class_counts, key=class_counts.get)
+        
+        # Вычисляем целевое количество семплов для undersampling
+        target_ratio = {
+            majority_class: int(class_counts[majority_class] * 0.8),  # Оставляем 80% большего класса
+            minority_class: class_counts[minority_class]  # Не трогаем меньший класс
+        }
+        
+        # Сначала уменьшаем больший класс
+        undersampler = RandomUnderSampler(
+            sampling_strategy=target_ratio,
+            random_state=42
+        )
+        vectors_under, labels_under = undersampler.fit_resample(
+            train_vectors, train_labels
+        )
+        
+        # Затем увеличиваем меньший класс до баланса
+        oversampler = RandomOverSampler(random_state=42)
+        train_vectors_balanced, train_labels_balanced = oversampler.fit_resample(
+            vectors_under, labels_under
+        )
+    
+    elif method == 'weighted':
+        class_weights = compute_class_weights(train_labels)
+        return train_vectors, train_labels, class_weights
+
+    print("Balanced class distribution:", Counter(train_labels_balanced))
+    return train_vectors_balanced, train_labels_balanced, None
+
+def compute_class_weights(labels):
+    """
+    Вычисление весов классов обратно пропорционально их частоте
+    """
+    class_counts = Counter(labels)
+    total_samples = len(labels)
+    class_weights = {
+        class_label: total_samples / (len(class_counts) * count)
+        for class_label, count in class_counts.items()
+    }
+    return class_weights
+
+def optimize_random_forest(trial):
+    # Гиперпараметры для оптимизации
+    n_estimators = trial.suggest_int('n_estimators', 100, 1000)
+    max_depth = trial.suggest_int('max_depth', 10, 100)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 4)
+    max_features = trial.suggest_categorical('max_features', ['sqrt', 'log2'])
+    
+    # Создаем и обучаем модель с текущими параметрами
+    model = RandomForestClassifier(
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        min_samples_leaf=min_samples_leaf,
+        max_features=max_features,
+        random_state=42,
+        n_jobs=-1
+    )
+    
+    model.fit(train_vectors_balanced, train_labels_balanced)
+    predictions = model.predict(test_vectors)
+    accuracy = accuracy_score(test_labels, predictions)
+    
+    return accuracy
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ad_filepath = os.path.join(BASE_DIR, 'data/reklama', 'result.json')
 non_ad_filepath = os.path.join(BASE_DIR, 'data/nereklama', 'result.json')
@@ -136,50 +228,29 @@ vectorizer = TfidfVectorizer(max_features=10000, stop_words=russian_stop_words, 
 train_vectors = vectorizer.fit_transform(train_texts)
 test_vectors = vectorizer.transform(test_texts)
 
-# Балансировка классов с помощью SMOTE
-smote = SMOTE(random_state=42)
-train_vectors_balanced, train_labels_balanced = smote.fit_resample(train_vectors, train_labels)
+# Балансировка данных
+train_vectors_balanced, train_labels_balanced, class_weights = balance_dataset(
+    train_vectors, 
+    train_labels,
+    method='combined'  # Можно выбрать: 'under', 'over', 'combined', 'weighted'
+)
 
-# Подсчет количества сообщений в каждом классе после SMOTE
-balanced_class_counts = Counter(train_labels_balanced)
-# Вывод количества сообщений для каждого класса после SMOTE
-print(f'{'-'*10}\nSMOTE DATA')
-print("Balanced dataset class distribution:")
-for label, count in balanced_class_counts.items():
-    print(f"Class {label}: {count}")
-print(f'{'-'*10}\n')
-
-# Расчет Class imbalance ratio после SMOTE
-class_imbalance_ratio = balanced_class_counts[0] / balanced_class_counts[1]
-print(f"Class imbalance ratio after SMOTE: {class_imbalance_ratio:.2f}")
-
-# Оптимизация гиперпараметров Random Forest с помощью Optuna
-def optimize_random_forest(trial):
-    n_estimators = trial.suggest_int('n_estimators', 70, 580)
-    max_depth = trial.suggest_int('max_depth', 100, 685)
-    min_samples_split = trial.suggest_int('min_samples_split', 2,32)
-    model = RandomForestClassifier(
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        min_samples_split=min_samples_split,
-        random_state=42,
-        n_jobs=-1
-    )
-    model.fit(train_vectors_balanced, train_labels_balanced)
-    predictions = model.predict(test_vectors)
-    return accuracy_score(test_labels, predictions)
-
-print('Optimize random forest')
+# Оптимизация гиперпараметров
 study_rf = optuna.create_study(direction='maximize')
-study_rf.optimize(optimize_random_forest, n_trials=100)
-print("Best Random Forest parameters:", study_rf.best_params)
+study_rf.optimize(optimize_random_forest, n_trials=500)
 
-# Финальное обучение модели с лучшими гиперпараметрами
-rf_best = RandomForestClassifier(**study_rf.best_params, random_state=42, n_jobs=-1)
+# Обучение модели с лучшими параметрами
+rf_best = RandomForestClassifier(
+    **study_rf.best_params,
+    random_state=42,
+    n_jobs=-1
+)
+
+# Обучение модели
 rf_best.fit(train_vectors_balanced, train_labels_balanced)
-rf_predictions = rf_best.predict(test_vectors)
 
 # Оценка модели
+rf_predictions = rf_best.predict(test_vectors)
 rf_accuracy = accuracy_score(test_labels, rf_predictions)
 print(f"Random Forest Test Accuracy: {rf_accuracy}")
 
@@ -187,3 +258,6 @@ print(f"Random Forest Test Accuracy: {rf_accuracy}")
 joblib.dump(rf_best, 'randfor_best_model.pkl')
 joblib.dump(vectorizer, 'randfor_vectorizer.pkl')
 print('Best model and vectorizer saved to disk.')
+
+print("Best parameters found:", study_rf.best_params)
+print("Best accuracy achieved:", study_rf.best_value)
