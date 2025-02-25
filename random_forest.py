@@ -187,10 +187,10 @@ def compute_class_weights(labels):
 
 def optimize_random_forest(trial):
     # Гиперпараметры для оптимизации
-    n_estimators = trial.suggest_int('n_estimators', 100, 1000)
-    max_depth = trial.suggest_int('max_depth', 10, 100)
-    min_samples_split = trial.suggest_int('min_samples_split', 2, 10)
-    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 4)
+    n_estimators = trial.suggest_int('n_estimators', 100, 3000)
+    max_depth = trial.suggest_int('max_depth', 10, 3000)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 16)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 16)
     max_features = trial.suggest_categorical('max_features', ['sqrt', 'log2'])
     
     # Создаем и обучаем модель с текущими параметрами
@@ -255,7 +255,7 @@ rf_accuracy = accuracy_score(test_labels, rf_predictions)
 print(f"Random Forest Test Accuracy: {rf_accuracy}")
 
 # Сохранение модели и векторизатора
-joblib.dump(rf_best, 'randfor_best_model.pkl')
+joblib.dump(rf_best, 'randfor_model.pkl')
 joblib.dump(vectorizer, 'randfor_vectorizer.pkl')
 print('Best model and vectorizer saved to disk.')
 
