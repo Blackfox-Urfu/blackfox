@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "5pcode"
+version = "0.1.0"
+description = ""
+authors = ["unser229 <69352467+unser229@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+openpyxl = "^3.1.5"
+matplotlib = "^3.10.0"
+numpy = "^2.2.3"
+pandas = "^2.2.3"
+tqdm = "^4.67.1"
+scikit-learn = "^1.6.1"
+graphviz = "^0.20.3"
+scipy = "^1.15.2"
+pulp = "^3.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
