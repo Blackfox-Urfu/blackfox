@@ -16,6 +16,7 @@ import optuna
 from datetime import datetime
 from collections import Counter
 import numpy as np
+import time
 
 # Загрузка данных
 def load_data(filepath):
@@ -205,10 +206,26 @@ def optimize_random_forest(trial):
     )
     
     model.fit(train_vectors_balanced, train_labels_balanced)
+    
+    # Измеряем время предсказания
+    start_time = time.time()
     predictions = model.predict(test_vectors)
+    prediction_time = time.time() - start_time
+    
     accuracy = accuracy_score(test_labels, predictions)
     
-    return accuracy
+    # Условие для точности
+    if accuracy < 0.86:
+        print(f"Trial {trial.number}: Accuracy = {accuracy:.4f} is below threshold. Skipping this trial.")
+        return float('-inf')  # Игнорируем эту итерацию
+    
+    # Учитываем время предсказания в качестве штрафа
+    performance_score = accuracy - prediction_time  # Можно настроить вес штрафа
+
+    # Выводим точность и время ответа
+    print(f"Trial {trial.number}: Accuracy = {accuracy:.4f}, Prediction Time = {prediction_time:.4f} seconds")
+    
+    return performance_score
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ad_filepath = os.path.join(BASE_DIR, 'data/reklama', 'result.json')
@@ -237,7 +254,7 @@ train_vectors_balanced, train_labels_balanced, class_weights = balance_dataset(
 
 # Оптимизация гиперпараметров
 study_rf = optuna.create_study(direction='maximize')
-study_rf.optimize(optimize_random_forest, n_trials=500)
+study_rf.optimize(optimize_random_forest, n_trials=1000)
 
 # Обучение модели с лучшими параметрами
 rf_best = RandomForestClassifier(
