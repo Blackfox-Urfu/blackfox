@@ -17,6 +17,7 @@ from datetime import datetime
 from collections import Counter
 import numpy as np
 import time
+import xgboost as xgb
 
 # Загрузка данных
 def load_data(filepath):
@@ -187,56 +188,59 @@ def compute_class_weights(labels):
     return class_weights
 
 def optimize_random_forest(trial):
-    # Гиперпараметры для оптимизации
-    n_estimators = trial.suggest_int('n_estimators', 100, 3000)
-    max_depth = trial.suggest_int('max_depth', 10, 3000)
-    min_samples_split = trial.suggest_int('min_samples_split', 2, 16)
-    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 16)
-    max_features = trial.suggest_categorical('max_features', ['sqrt', 'log2'])
-    
-    # Создаем и обучаем модель с текущими параметрами
-    model = RandomForestClassifier(
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        min_samples_split=min_samples_split,
-        min_samples_leaf=min_samples_leaf,
-        max_features=max_features,
-        random_state=42,
-        n_jobs=-1
-    )
-    
-    model.fit(train_vectors_balanced, train_labels_balanced)
-    
+    n_estimators = trial.suggest_int('n_estimators', 50, 200)  # Уменьшите верхнюю границу
+    max_depth = trial.suggest_int('max_depth', 3, 6)  # Уменьшите верхнюю границу
+    learning_rate = trial.suggest_float('learning_rate', 0.01, 0.3)
+
+    dtrain = xgb.DMatrix(train_vectors_balanced, label=train_labels_balanced)
+    dtest = xgb.DMatrix(test_vectors, label=test_labels)
+
+    # Вычисление весов классов
+    scale_pos_weight = len(train_labels_balanced) / (2 * Counter(train_labels_balanced)[1])  # Пример для бинарной классификации
+
+    params = {
+        'objective': 'binary:logistic',
+        'booster': 'gbtree',
+        'tree_method': 'hist',  # Используйте 'hist' вместо 'gpu_hist'
+        'device': 'cuda',  # Укажите использование GPU
+        'max_depth': max_depth,
+        'learning_rate': learning_rate,
+        'eval_metric': 'logloss',
+        'random_state': 42,
+        'scale_pos_weight': scale_pos_weight,  # Использование весов классов
+        'max_bin': 256,  # Установите значение, чтобы ограничить использование памяти
+    }
+
+    model = xgb.train(params, dtrain, num_boost_round=n_estimators)
+
     # Измеряем время предсказания
     start_time = time.time()
-    predictions = model.predict(test_vectors)
+    predictions = model.predict(dtest)
     prediction_time = time.time() - start_time
-    
-    accuracy = accuracy_score(test_labels, predictions)
-    
-    # Условие для точности
-    if accuracy < 0.86:
-        print(f"Trial {trial.number}: Accuracy = {accuracy:.4f} is below threshold. Skipping this trial.")
-        return float('-inf')  # Игнорируем эту итерацию
-    
-    # Учитываем время предсказания в качестве штрафа
-    performance_score = accuracy - prediction_time  # Можно настроить вес штрафа
 
-    # Выводим точность и время ответа
-    print(f"Trial {trial.number}: Accuracy = {accuracy:.4f}, Prediction Time = {prediction_time:.4f} seconds")
-    
+    accuracy = accuracy_score(test_labels, predictions > 0.5)
+
+    # Вычисляем performance_score
+    performance_score = accuracy - prediction_time
+
+    if accuracy < 0.9913:
+        print(f"Trial {trial.number}: Accuracy = {accuracy:.4f} is below threshold. Skipping this trial.")
+        return float('-inf')
+
+    print(f"Trial {trial.number}: Accuracy = {accuracy:.4f}, Prediction Time = {prediction_time:.4f} seconds, Performance Score = {performance_score:.4f}")
+
     return performance_score
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ad_filepath = os.path.join(BASE_DIR, 'data/reklama', 'result.json')
-non_ad_filepath = os.path.join(BASE_DIR, 'data/nereklama', 'result.json')
+ad_filepath = os.path.join(BASE_DIR, 'data', 'reklama_data.json')
+non_ad_filepath = os.path.join(BASE_DIR, 'data', 'nereklama_data.json')
 texts, labels = process_data(ad_filepath, non_ad_filepath)
 
 # Вывод статистики по датасету 
 dataset_statistics(texts, labels)
 
 # Разделение данных на обучающую и тестовую выборки
-train_texts, test_texts, train_labels, test_labels = train_test_split(texts, labels, test_size=0.2, random_state=42)
+train_texts, test_texts, train_labels, test_labels = train_test_split(texts, labels, test_size=0.5, random_state=42)
 
 # Векторизация текста с помощью TF-IDF
 nltk.download('stopwords')
@@ -249,7 +253,7 @@ test_vectors = vectorizer.transform(test_texts)
 train_vectors_balanced, train_labels_balanced, class_weights = balance_dataset(
     train_vectors, 
     train_labels,
-    method='combined'  # Можно выбрать: 'under', 'over', 'combined', 'weighted'
+    method='over'  # Используем только oversampling для рекламного класса
 )
 
 # Оптимизация гиперпараметров
@@ -272,8 +276,8 @@ rf_accuracy = accuracy_score(test_labels, rf_predictions)
 print(f"Random Forest Test Accuracy: {rf_accuracy}")
 
 # Сохранение модели и векторизатора
-joblib.dump(rf_best, 'randfor_model.pkl')
-joblib.dump(vectorizer, 'randfor_vectorizer.pkl')
+joblib.dump(rf_best, 'xg_randfor_model.pkl')
+joblib.dump(vectorizer, 'xg_randfor_vectorizer.pkl')
 print('Best model and vectorizer saved to disk.')
 
 print("Best parameters found:", study_rf.best_params)
