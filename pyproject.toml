@@ -3,19 +3,14 @@ name = "blackfox"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "unser229",email = "gycogco@gmail.com"}
+    {name = "unser229"}
 ]
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "matplotlib (>=3.10.0,<4.0.0)",
-    "scipy (>=1.15.2,<2.0.0)",
     "numpy (>=2.2.3,<3.0.0)",
-    "openpyxl (>=3.1.5,<4.0.0)",
-    "scikit-learn (>=1.6.1,<2.0.0)",
-    "tqdm (>=4.67.1,<5.0.0)",
-    "pandas (>=2.2.3,<3.0.0)",
-    "graphviz (>=0.20.3,<0.21.0)"
+    "scipy (>=1.15.2,<2.0.0)",
+    "matplotlib (>=3.10.1,<4.0.0)"
 ]
 
 

@@ -18,91 +18,73 @@ CPU2 = {
     "AMD Ryzen 9 5900X": {"cost": 104500, "flops": 177.6, "power": 2846.15, "consumption": 242},
 }
 
-def linear_programming_example(users, CPU, max_consumption=1000):
-    """
-    Решает задачу линейного программирования и строит график.
-    """
+def linear_programming_example(users, CPU, max_consumption):
     cpu_models = list(CPU.keys())
     costs = [CPU[cpu]['cost'] for cpu in CPU]
     powers = [CPU[cpu]['power'] for cpu in CPU]
     consumptions = [CPU[cpu]['consumption'] for cpu in CPU]
-    
+
+    budget = 3000000
+
     c = costs
-    A = [[-powers[0], -powers[1]],
-         [consumptions[0], consumptions[1]]]
-    b = [-users, max_consumption]
+    A = [
+        [-powers[0], -powers[1]],
+        [consumptions[0], consumptions[1]],
+        [costs[0], costs[1]]
+    ]
+    b = [-users, max_consumption, budget]
     bounds = [(0, None), (0, None)]
-    
+
     result = linprog(c, A_ub=A, b_ub=b, bounds=bounds, method='highs')
-    
+
     if result.success:
-        # Округляем решения до целых чисел
         x_rounded = np.ceil(result.x[0])
         y_rounded = np.ceil(result.x[1])
-
-        # Создаем рисунок большего размера
         plt.figure(figsize=(20, 16))
-        
-        # Определяем границы диапазона для x
+
         x_max = max(max_consumption / consumptions[0] * 1.2, x_rounded * 1.5)
         x = np.linspace(0, x_max, 400)
-        
-        # Вычисляем границы
+
         y1 = (max_consumption - consumptions[0] * x) / consumptions[1]
-        y2 = (users - powers[0] * x) / powers[1] if powers[1] != 0 else 0
-        
-        # Рассчитываем максимальное значение y для лучшего масштабирования
-        y_max = max(np.max(y1[y1 > 0]), np.max(y2[y2 > 0]), y_rounded * 1.5)
-        
-        # Строим линии ограничений
+        y2 = (users - powers[0] * x) / powers[1] if powers[1] != 0 else np.full_like(x, np.inf)
+        y3 = (budget - costs[0] * x) / costs[1] if costs[1] != 0 else np.full_like(x, np.inf)
+
+        y_max = max(np.max(y1[y1 > 0]), np.max(y2[y2 > 0]), np.max(y3[y3 > 0]), y_rounded * 1.5)
+
         plt.plot(x, y1, 'r-', label=f'Ограничение энергопотребления: {consumptions[0]}x + {consumptions[1]}y ≤ {max_consumption} Вт')
         plt.plot(x, y2, 'b-', label=f'Требуемая производительность: {powers[0]:.1f}x + {powers[1]:.1f}y ≥ {users} пользователей')
-        
-        # Отмечаем оптимальное решение
+        plt.plot(x, y3, 'g-', label=f'Ограничение бюджета: {costs[0]}x + {costs[1]}y ≤ {budget}')
+
         plt.plot(x_rounded, y_rounded, 'ro', markersize=10, label=f'Оптимальное решение: ({x_rounded}, {y_rounded})')
         plt.annotate(f'({x_rounded:.1f}, {y_rounded:.1f})',
                      xy=(x_rounded, y_rounded),
                      xytext=(10, 10),
                      textcoords='offset points')
-        
-        # Устанавливаем расширенные границы осей
+
         plt.xlim(0, x_max)
         plt.ylim(0, y_max)
-        
-        # Добавляем подписи и сетку
         plt.xlabel(f'Количество {cpu_models[0]}', fontsize=12)
         plt.ylabel(f'Количество {cpu_models[1]}', fontsize=12)
         plt.grid(True, linestyle='--', alpha=0.7)
-        
-        # Заполняем допустимую область
-        plt.fill_between(x, np.maximum(y2, 0), y1, 
-                         where=(y1 > np.maximum(y2, 0)) & (x <= x_max) & (y1 <= y_max), 
-                         color='green', alpha=0.3)
-        
-        # Добавляем пояснительный текст
+
+        plt.fill_between(x, np.maximum.reduce([y2, np.zeros_like(x)]), np.minimum.reduce([y1, y3]),
+                 where=(np.minimum.reduce([y1, y3]) > np.maximum.reduce([y2, np.zeros_like(x)])) & (x <= x_max) & (np.minimum.reduce([y1, y3]) <= y_max),
+                 color='green', alpha=0.3)
+
         plt.text(0.02, 0.98, 'Зеленая область - допустимые решения\nКрасная точка - оптимальное решение',
-                 transform=plt.gca().transAxes, bbox=dict(facecolor='white', alpha=0.8), 
+                 transform=plt.gca().transAxes, bbox=dict(facecolor='white', alpha=0.8),
                  verticalalignment='top', fontsize=12)
-        
-        # Размещаем легенду снаружи графика
+
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
-        
-        # Применяем автоматическую компоновку с дополнительными полями
         plt.tight_layout(pad=3.0)
-        
-        # Сохраняем с дополнительными параметрами для предотвращения обрезания
-        plt.savefig(f'feasible_region_{cpu_models[0]}_{cpu_models[1]}.png', 
-                    bbox_inches='tight',  # Автоматическое определение границ
-                    dpi=320,             # разрешение
-                    pad_inches=0.5)      # пространство вокруг графика
-        
-        plt.show()
+
+        plt.savefig(f'feasible_region_{cpu_models[0]}_{cpu_models[1]}_updated.png',
+                    bbox_inches='tight', dpi=320, pad_inches=0.5)
     else:
         print("Linear programming failed:", result.message)
-
 # Параметры
 users = 40000
-max_consumption = 10000
+max_consumption = 8000
 
 # Запуск
 linear_programming_example(users, CPU0, max_consumption)
