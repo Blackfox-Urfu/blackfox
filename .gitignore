@@ -26,3 +26,5 @@ randfor_vectorizer.pkl
 results/
 bert_best_model.pkl
 bert_tokenizer.pkl
+tdlib/
+classifications.csv
