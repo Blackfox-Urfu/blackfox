@@ -220,7 +220,7 @@ def optimize_random_forest(trial):
         return float('-inf')  # Игнорируем эту итерацию
     
     # Учитываем время предсказания в качестве штрафа
-    performance_score = accuracy - prediction_time  # Можно настроить вес штрафа
+    performance_score = accuracy - prediction_time*0.5  # Можно настроить вес штрафа
 
     # Выводим точность и время ответа
     print(f"Trial {trial.number}: Accuracy = {accuracy:.4f}, Prediction Time = {prediction_time:.4f} seconds")
