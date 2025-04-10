@@ -23,3 +23,7 @@ randfor_vectorizer.pkl
 cat_best_model.pkl
 cat_vectorizer.pkl
 posts_data.csv
+tdlib/
+regular_messages.csv
+advertisements.csv
+tdlib_auth.log

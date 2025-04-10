@@ -10,6 +10,19 @@ import asyncio
 import re
 from pybloom_live import ScalableBloomFilter
 import hashlib
+import logging
+from datetime import datetime
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('tdlib_auth.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('TDLibAuth')
 
 # Инициализация Bloom Filter
 message_filter = ScalableBloomFilter(initial_capacity=1000000, error_rate=0.001)
@@ -101,63 +114,96 @@ def start_authorization():
         'database_directory': 'tdlib',
         'use_message_database': True,
         'use_secret_chats': True,
-        'api_id': api_id,
-        'api_hash': api_hash,
+        'api_id': os.getenv('api_id'),
+        'api_hash': os.getenv('api_hash'),
         'system_language_code': 'en',
         'device_model': 'Desktop',
         'application_version': '1.0'
     }).encode('utf-8'))
+    print("[+] Параметры TDLib отправлены.")
+
 
 async def main_async():
+    logger.info("Starting authorization process")
     start_authorization()
     
+    auth_complete = False
+    
     while True:
-        event = _td_receive(1.0)
-        if event:
-            event = json.loads(event.decode('utf-8'))
-            
-            if event['@type'] == 'updateAuthorizationState':
-                auth_state = event['authorization_state']['@type']
+        try:
+            event = _td_receive(1.0)
+            if event:
+                event = json.loads(event.decode('utf-8'))
+                logger.debug(f"Received event: {json.dumps(event, indent=2)}")
                 
-                if auth_state == 'authorizationStateWaitPhoneNumber':
-                    phone_number = input("Введите номер телефона: ")
-                    _td_send(client_id, json.dumps({
-                        '@type': 'setAuthenticationPhoneNumber',
-                        'phone_number': phone_number
-                    }).encode('utf-8'))
-                    
-                elif auth_state == 'authorizationStateWaitCode':
-                    code = input("Введите код из SMS: ")
-                    _td_send(client_id, json.dumps({
-                        '@type': 'checkAuthenticationCode',
-                        'code': code
-                    }).encode('utf-8'))
-                    
-                elif auth_state == 'authorizationStateWaitPassword':
-                    password = input("Введите пароль: ")
-                    _td_send(client_id, json.dumps({
-                        '@type': 'checkAuthenticationPassword',
-                        'password': password
-                    }).encode('utf-8'))
-            
-            elif event['@type'] == 'updateNewMessage':
-                if event['message']['content']['@type'] != 'messageText':
-                    continue
-                    
-                message = event['message']['content']['text']['text']
-                msg_hash = get_message_hash(message)
+                if not auth_complete:
+                    if event['@type'] == 'updateAuthorizationState':
+                        auth_state = event['authorization_state']['@type']
+                        logger.info(f"Authorization state: {auth_state}")
+                        
+                        if auth_state == 'authorizationStateWaitPhoneNumber':
+                            phone_number = input("Введите номер телефона: ")
+                            _td_send(client_id, json.dumps({
+                                '@type': 'setAuthenticationPhoneNumber',
+                                'phone_number': phone_number
+                            }).encode('utf-8'))
+                            
+                        elif auth_state == 'authorizationStateWaitCode':
+                            code = input("Введите код из SMS: ")
+                            _td_send(client_id, json.dumps({
+                                '@type': 'checkAuthenticationCode',
+                                'code': code
+                            }).encode('utf-8'))
+                            
+                        elif auth_state == 'authorizationStateWaitPassword':
+                            password = input("Введите пароль: ")
+                            _td_send(client_id, json.dumps({
+                                '@type': 'checkAuthenticationPassword',
+                                'password': password
+                            }).encode('utf-8'))
+                        
+                        elif auth_state == 'authorizationStateReady':
+                            logger.info("Authorization completed successfully")
+                            auth_complete = True
+                            # Загружаем чаты после авторизации
+                            _td_send(client_id, json.dumps({
+                                '@type': 'loadChats',
+                                'limit': 100
+                            }).encode('utf-8'))
                 
-                if msg_hash not in message_filter:
-                    message_filter.add(msg_hash)
+                # Обработка сообщений после авторизации
+                if auth_complete and event['@type'] == 'updateNewMessage':
+                    if event['message']['content']['@type'] == 'messageText':
+                        message = event['message']['content']['text']['text']
+                        msg_hash = get_message_hash(message)
+                        
+                        if msg_hash not in message_filter:
+                            message_filter.add(msg_hash)
+                            
+                            sender = event['message']['sender_id']
+                            sender_id = sender.get('user_id', sender.get('chat_id', 'Unknown'))
+                            chat_id = event['message']['chat_id']
+                            
+                            result = await classify_message_async(message)
+                            if result:
+                                filename = 'advertisements.csv' if is_advertisement(message) else 'regular_messages.csv'
+                                write_to_csv([message, result, sender_id, chat_id], filename)
+                                logger.info(f"Processed message from chat {chat_id}")
+                
+                elif event['@type'] == 'error':
+                    logger.error(f"TDLib error: {event['message']}")
+                    if event['code'] == 429:
+                        logger.error("Too many requests, waiting before retry...")
+                        await asyncio.sleep(10)
+                
+                elif event['@type'] == 'updateConnectionState':
+                    logger.info(f"Connection state: {event['state']['@type']}")
                     
-                    sender = event['message']['sender_id']
-                    sender_id = sender.get('user_id', sender.get('chat_id', 'Unknown'))
-                    chat_id = event['message']['chat_id']
-                    
-                    result = await classify_message_async(message)
-                    if result:
-                        filename = 'advertisements.csv' if is_advertisement(message) else 'regular_messages.csv'
-                        write_to_csv([message, result, sender_id, chat_id], filename)
-
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+            await asyncio.sleep(1)
+            
 if __name__ == "__main__":
     asyncio.run(main_async())
