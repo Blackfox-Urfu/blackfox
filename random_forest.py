@@ -254,7 +254,7 @@ train_vectors_balanced, train_labels_balanced, class_weights = balance_dataset(
 
 # Оптимизация гиперпараметров
 study_rf = optuna.create_study(direction='maximize')
-study_rf.optimize(optimize_random_forest, n_trials=1000)
+study_rf.optimize(optimize_random_forest, n_trials=1500)
 
 # Обучение модели с лучшими параметрами
 rf_best = RandomForestClassifier(
