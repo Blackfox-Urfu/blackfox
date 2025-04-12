@@ -1,1 +1,0 @@
-[I 2025-02-24 12:57:53,656] Trial 173 finished with value: 0.881578947368421 and parameters: {'n_estimators': 1458, 'max_depth': 852, 'min_samples_split': 3, 'min_samples_leaf': 1, 'max_features': 'log2'}. Best is trial 173 with value: 0.881578947368421.
