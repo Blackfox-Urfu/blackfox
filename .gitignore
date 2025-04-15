@@ -27,3 +27,5 @@ tdlib/
 regular_messages.csv
 advertisements.csv
 tdlib_auth.log
+decision_tree_limited_depth.svg
+random_forest_structure.csv

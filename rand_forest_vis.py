@@ -5,7 +5,7 @@ import csv
 from sklearn.ensemble import RandomForestClassifier
 
 # Загрузка модели и векторизатора
-rf_model = joblib.load('randfor_best_model.pkl')
+rf_model = joblib.load('randfor_model.pkl')
 vectorizer = joblib.load('randfor_vectorizer.pkl')
 
 # Выбираем одно дерево из случайного леса
