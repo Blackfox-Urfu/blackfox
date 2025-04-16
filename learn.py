@@ -1,4 +1,5 @@
 import os
+import gc
 import cv2
 import numpy as np
 import optuna
@@ -9,35 +10,32 @@ from skimage import exposure
 from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import classification_report
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Пути к данным
 SLUT_DIR = 'data/slut'
 REGULAR_DIR = 'data/regular'
 
-def load_images_from_folder(folder, label):
-    """Загружает все изображения из указанной папки и присваивает им метку"""
-    features = []
-    labels = []
-    for filename in os.listdir(folder):
-        img_path = os.path.join(folder, filename)
-        if os.path.isfile(img_path):
-            try:
-                img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-                if img is not None:
-                    features.append(img)
-                    labels.append(label)
-            except Exception as e:
-                print(f"Ошибка при обработке {img_path}: {e}")
-    return features, labels
+def load_image(img_path, label):
+    """Загружает одно изображение и сразу обрабатывает его"""
+    try:
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            return img, label
+        return None, None
+    except Exception as e:
+        print(f"Ошибка при обработке {img_path}: {e}")
+        return None, None
 
-def extract_hog_features(images, params):
-    """Извлекает HOG-признаки для списка изображений"""
-    hog_features = []
-    for img in images:
-        # Изменение размера
+def process_single_image(args, params):
+    """Обрабатывает одно изображение и извлекает HOG-признаки"""
+    img_path, label = args
+    img, label = load_image(img_path, label)
+    if img is None:
+        return None
+    
+    try:
         img_resized = cv2.resize(img, (params['resize'], params['resize']))
-        
-        # Извлечение HOG-признаков
         features = hog(
             img_resized,
             orientations=params['orientations'],
@@ -45,8 +43,36 @@ def extract_hog_features(images, params):
             cells_per_block=(params['cells_per_block'], params['cells_per_block']),
             block_norm='L2-Hys'
         )
-        hog_features.append(features)
-    return np.array(hog_features)
+        return features, label
+    except Exception as e:
+        print(f"Ошибка при обработке HOG {img_path}: {e}")
+        return None
+
+def process_images_in_directory(folder, label, params, max_workers=4):
+    """Обрабатывает все изображения в директории с использованием пула потоков"""
+    filepaths = [os.path.join(folder, f) for f in os.listdir(folder) 
+                if os.path.isfile(os.path.join(folder, f))]
+    
+    features = []
+    labels = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Создаем задачи для обработки каждого изображения
+        futures = [executor.submit(process_single_image, (fp, label), params) 
+                  for fp in filepaths]
+        
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                feat, lbl = result
+                features.append(feat)
+                labels.append(lbl)
+    
+    return np.array(features, dtype=np.float32), np.array(labels)
+
+def optimize_memory_usage():
+    """Принудительно очищает память"""
+    gc.collect()
 
 def visualize_hog(img, params):
     """Визуализирует HOG-признаки для одного изображения"""
@@ -76,54 +102,78 @@ def visualize_hog(img, params):
     plt.show()
 
 def objective(trial):
-    """Функция для оптимизации гиперпараметров с помощью Optuna"""
+    """Функция для оптимизации гиперпараметров с минимальным использованием памяти"""
     # Параметры для оптимизации
     hog_params = {
         'resize': trial.suggest_categorical('resize', [64, 96, 128]),
         'orientations': trial.suggest_int('orientations', 6, 12),
-        'pixels_per_cell': trial.suggest_categorical('pixels_per_cell', [4, 8, 16]),
-        'cells_per_block': trial.suggest_categorical('cells_per_block', [1, 2, 3])
+        'pixels_per_cell': trial.suggest_categorical('pixels_per_cell', [8, 16]),
+        'cells_per_block': trial.suggest_categorical('cells_per_block', [2, 3])
     }
     C = trial.suggest_float('C', 0.01, 10.0, log=True)
     
-    # Загрузка данных
-    slut_images, slut_labels = load_images_from_folder(SLUT_DIR, 1)
-    regular_images, regular_labels = load_images_from_folder(REGULAR_DIR, 0)
+    try:
+        # Обрабатываем изображения по одной директории за раз
+        X_slut, y_slut = process_images_in_directory(SLUT_DIR, 1, hog_params)
+        optimize_memory_usage()
+        
+        X_regular, y_regular = process_images_in_directory(REGULAR_DIR, 0, hog_params)
+        optimize_memory_usage()
+        
+        if len(X_slut) == 0 or len(X_regular) == 0:
+            raise optuna.exceptions.TrialPruned()
+        
+        # Объединяем данные
+        X = np.vstack((X_slut, X_regular))
+        y = np.concatenate((y_slut, y_regular))
+        
+        # Освобождаем память от временных переменных
+        del X_slut, y_slut, X_regular, y_regular
+        optimize_memory_usage()
+        
+        # Используем подвыборку для ускорения оптимизации
+        X_sample, _, y_sample, _ = train_test_split(X, y, train_size=0.5, random_state=42)
+        
+        # Освобождаем память от полного набора данных
+        del X, y
+        optimize_memory_usage()
+        
+        # Кросс-валидация
+        clf = LinearSVC(C=C, max_iter=10000, dual=False)  # dual=False для экономии памяти
+        scores = cross_val_score(clf, X_sample, y_sample, cv=3, scoring='f1_macro')
+        
+        return np.mean(scores)
     
-    if not slut_images or not regular_images:
+    except Exception as e:
+        print(f"Ошибка в trial: {e}")
         raise optuna.exceptions.TrialPruned()
-    
-    # Извлечение признаков
-    X_slut = extract_hog_features(slut_images, hog_params)
-    X_regular = extract_hog_features(regular_images, hog_params)
-    
-    X = np.vstack((X_slut, X_regular))
-    y = np.array(slut_labels + regular_labels)
-    
-    # Кросс-валидация
-    clf = LinearSVC(C=C, max_iter=10000)
-    scores = cross_val_score(clf, X, y, cv=3, scoring='f1_macro')
-    
-    return np.mean(scores)
 
 def train_final_model(best_params):
     """Обучает финальную модель с лучшими параметрами"""
-    # Загрузка данных
-    slut_images, slut_labels = load_images_from_folder(SLUT_DIR, 1)
-    regular_images, regular_labels = load_images_from_folder(REGULAR_DIR, 0)
+    # Обрабатываем изображения по одной директории за раз
+    X_slut, y_slut = process_images_in_directory(SLUT_DIR, 1, best_params)
+    optimize_memory_usage()
     
-    # Извлечение признаков
-    X_slut = extract_hog_features(slut_images, best_params)
-    X_regular = extract_hog_features(regular_images, best_params)
+    X_regular, y_regular = process_images_in_directory(REGULAR_DIR, 0, best_params)
+    optimize_memory_usage()
     
+    # Объединяем данные
     X = np.vstack((X_slut, X_regular))
-    y = np.array(slut_labels + regular_labels)
+    y = np.concatenate((y_slut, y_regular))
+    
+    # Освобождаем память от временных переменных
+    del X_slut, y_slut, X_regular, y_regular
+    optimize_memory_usage()
     
     # Разделение на train/test
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
-    # Обучение модели
-    clf = LinearSVC(C=best_params['C'], max_iter=10000)
+    # Освобождаем память от полного набора данных
+    del X, y
+    optimize_memory_usage()
+    
+    # Обучение модели с параметрами для экономии памяти
+    clf = LinearSVC(C=best_params['C'], max_iter=10000, dual=False)
     clf.fit(X_train, y_train)
     
     # Оценка
@@ -145,6 +195,8 @@ def show_examples(folder, n=3):
         img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
         if img is not None:
             images.append(img)
+        if len(images) >= n:
+            break
     
     plt.figure(figsize=(15, 5))
     for i, img in enumerate(images, 1):
@@ -166,7 +218,9 @@ if __name__ == "__main__":
     # Оптимизация гиперпараметров
     print("\nНачинаем оптимизацию гиперпараметров...")
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=30, n_jobs=-1)
+    
+    # Ограничиваем параллелизм для экономии памяти
+    study.optimize(objective, n_trials=20, n_jobs=1)  # n_jobs=1 для стабильности памяти
     
     print("\n[🏆] Лучшие параметры:")
     print(study.best_params)
@@ -174,16 +228,24 @@ if __name__ == "__main__":
     
     # Обучение финальной модели
     best_params = study.best_params
+    best_params['C'] = study.best_params['C']  # Добавляем параметр C
     clf = train_final_model(best_params)
     
     # Визуализация HOG для примеров
-    slut_images, _ = load_images_from_folder(SLUT_DIR, 1)
-    regular_images, _ = load_images_from_folder(REGULAR_DIR, 0)
+    print("\nВизуализация HOG для примеров:")
+    slut_example = next((os.path.join(SLUT_DIR, f) for f in os.listdir(SLUT_DIR) 
+                       if os.path.isfile(os.path.join(SLUT_DIR, f))), None)
+    regular_example = next((os.path.join(REGULAR_DIR, f) for f in os.listdir(REGULAR_DIR) 
+                          if os.path.isfile(os.path.join(REGULAR_DIR, f))), None)
     
-    if slut_images:
-        print("\nВизуализация HOG для примера из slut:")
-        visualize_hog(slut_images[0], best_params)
+    if slut_example:
+        img = cv2.imread(slut_example, cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            print("\nПример из slut:")
+            visualize_hog(img, best_params)
     
-    if regular_images:
-        print("\nВизуализация HOG для примера из regular:")
-        visualize_hog(regular_images[0], best_params)
+    if regular_example:
+        img = cv2.imread(regular_example, cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            print("\nПример из regular:")
+            visualize_hog(img, best_params)
