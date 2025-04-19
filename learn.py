@@ -100,7 +100,7 @@ def visualize_hog(img, params, out_filename=None):
 
 def objective(trial):
     hog_params = {
-        'resize': trial.suggest_categorical('resize', [64, 96, 128]),
+        'resize': trial.suggest_categorical('resize', [64, 96]),
         'orientations': trial.suggest_int('orientations', 6, 12),
         'pixels_per_cell': trial.suggest_categorical('pixels_per_cell', [8, 16]),
         'cells_per_block': trial.suggest_categorical('cells_per_block', [2, 3])
@@ -162,6 +162,8 @@ def train_final_model(best_params):
 
     joblib.dump(clf, 'best_hog_model.pkl')
     print("[💾] Модель сохранена в 'best_hog_model.pkl'")
+    joblib.dump(best_params, 'hog_params.pkl')
+    print("[💾] Параметры HOG сохранены в 'hog_params.pkl'")
     return clf
 
 def show_examples(folder, n=3):

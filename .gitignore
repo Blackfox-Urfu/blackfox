@@ -29,3 +29,6 @@ advertisements.csv
 tdlib_auth.log
 decision_tree_limited_depth.svg
 random_forest_structure.csv
+best_hog_model.pkl
+hog_params.pkl
+hog_visualizations/
