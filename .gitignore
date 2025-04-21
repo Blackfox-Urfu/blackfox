@@ -28,3 +28,7 @@ bert_best_model.pkl
 bert_tokenizer.pkl
 tdlib/
 classifications.csv
+best_hog_model.pkl
+hog_params.pkl
+posts_data.csv
+hog_visualizations/
