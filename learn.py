@@ -11,6 +11,13 @@ from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import classification_report
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.pipeline import Pipeline as ImbPipeline
+from sklearn.utils.class_weight import compute_class_weight
+from collections import Counter
+from PIL import ImageOps
+from PIL import Image 
 
 # Пути к данным
 SLUT_DIR = 'data/slut'
@@ -22,13 +29,14 @@ os.makedirs(HOG_VIS_DIR, exist_ok=True)
 
 def load_image(img_path, label):
     try:
-        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        if img is not None:
-            return img, label
-        return None, None
+        with Image.open(img_path) as img:
+            img = img.convert('L')  # Преобразуем в оттенки серого
+            img_array = np.array(img)
+            return img_array, label
     except Exception as e:
         print(f"Ошибка при обработке {img_path}: {e}")
         return None, None
+
 
 def process_single_image(args, params):
     img_path, label = args
@@ -36,9 +44,12 @@ def process_single_image(args, params):
     if img is None:
         return None
     try:
-        img_resized = cv2.resize(img, (params['resize'], params['resize']))
+        img_pil = Image.fromarray(img)
+        img_resized = img_pil.resize((params['resize'], params['resize']), Image.Resampling.LANCZOS)
+        img_np = np.array(img_resized)
+
         features = hog(
-            img_resized,
+            img_np,
             orientations=params['orientations'],
             pixels_per_cell=(params['pixels_per_cell'], params['pixels_per_cell']),
             cells_per_block=(params['cells_per_block'], params['cells_per_block']),
@@ -67,10 +78,12 @@ def optimize_memory_usage():
     gc.collect()
 
 def visualize_hog(img, params, out_filename=None):
-    """Визуализирует и сохраняет HOG-признаки"""
-    img_resized = cv2.resize(img, (params['resize'], params['resize']))
+    img_pil = Image.fromarray(img)
+    img_resized = img_pil.resize((params['resize'], params['resize']), Image.Resampling.LANCZOS)
+    img_np = np.array(img_resized)
+
     _, hog_image = hog(
-        img_resized,
+        img_np,
         orientations=params['orientations'],
         pixels_per_cell=(params['pixels_per_cell'], params['pixels_per_cell']),
         cells_per_block=(params['cells_per_block'], params['cells_per_block']),
@@ -106,13 +119,11 @@ def objective(trial):
         'cells_per_block': trial.suggest_categorical('cells_per_block', [2, 3])
     }
     C = trial.suggest_float('C', 0.01, 10.0, log=True)
+    balance_method = trial.suggest_categorical('balance_method', ['class_weight', 'smote', 'under_sampling'])
 
     try:
         X_slut, y_slut = process_images_in_directory(SLUT_DIR, 1, hog_params)
-        optimize_memory_usage()
-
         X_regular, y_regular = process_images_in_directory(REGULAR_DIR, 0, hog_params)
-        optimize_memory_usage()
 
         if len(X_slut) == 0 or len(X_regular) == 0:
             raise optuna.exceptions.TrialPruned()
@@ -120,16 +131,29 @@ def objective(trial):
         X = np.vstack((X_slut, X_regular))
         y = np.concatenate((y_slut, y_regular))
 
-        del X_slut, y_slut, X_regular, y_regular
-        optimize_memory_usage()
+        # Логирование распределения классов
+        print(f"\nРаспределение классов до балансировки: {Counter(y)}")
+        
+        if balance_method == 'class_weight':
+            classes = np.unique(y)
+            weights = compute_class_weight('balanced', classes=classes, y=y)
+            class_weights = dict(zip(classes, weights))
+            clf = LinearSVC(C=C, max_iter=10000, dual=False, class_weight=class_weights)
+        else:
+            clf = LinearSVC(C=C, max_iter=10000, dual=False)
+            if balance_method == 'smote':
+                pipeline = ImbPipeline([
+                    ('smote', SMOTE(random_state=42)),
+                    ('svm', clf)
+                ])
+            else:  # under_sampling
+                pipeline = ImbPipeline([
+                    ('under', RandomUnderSampler(random_state=42)),
+                    ('svm', clf)
+                ])
+            clf = pipeline
 
-        X_sample, _, y_sample, _ = train_test_split(X, y, train_size=0.5, random_state=42)
-        del X, y
-        optimize_memory_usage()
-
-        clf = LinearSVC(C=C, max_iter=10000, dual=False)
-        scores = cross_val_score(clf, X_sample, y_sample, cv=3, scoring='f1_macro')
-
+        scores = cross_val_score(clf, X, y, cv=3, scoring='f1_macro')
         return np.mean(scores)
 
     except Exception as e:
@@ -138,41 +162,52 @@ def objective(trial):
 
 def train_final_model(best_params):
     X_slut, y_slut = process_images_in_directory(SLUT_DIR, 1, best_params)
-    optimize_memory_usage()
-
     X_regular, y_regular = process_images_in_directory(REGULAR_DIR, 0, best_params)
-    optimize_memory_usage()
 
     X = np.vstack((X_slut, X_regular))
     y = np.concatenate((y_slut, y_regular))
 
-    del X_slut, y_slut, X_regular, y_regular
-    optimize_memory_usage()
+    print(f"\nФинальное распределение классов: {Counter(y)}")
+    
+    # Применяем лучший метод балансировки
+    if best_params.get('balance_method') == 'class_weight':
+        classes = np.unique(y)
+        weights = compute_class_weight('balanced', classes=classes, y=y)
+        class_weights = dict(zip(classes, weights))
+        clf = LinearSVC(C=best_params['C'], max_iter=10000, dual=False, class_weight=class_weights)
+    else:
+        clf = LinearSVC(C=best_params['C'], max_iter=10000, dual=False)
+        if best_params.get('balance_method') == 'smote':
+            X, y = SMOTE(random_state=42).fit_resample(X, y)
+        else:  # under_sampling
+            X, y = RandomUnderSampler(random_state=42).fit_resample(X, y)
+    
+    print(f"Распределение после балансировки: {Counter(y)}")
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    del X, y
-    optimize_memory_usage()
-
-    clf = LinearSVC(C=best_params['C'], max_iter=10000, dual=False)
     clf.fit(X_train, y_train)
 
     y_pred = clf.predict(X_test)
     print("\n[📊] Classification Report:")
     print(classification_report(y_test, y_pred))
 
+    # Сохраняем модель и параметры
     joblib.dump(clf, 'best_hog_model.pkl')
-    print("[💾] Модель сохранена в 'best_hog_model.pkl'")
     joblib.dump(best_params, 'hog_params.pkl')
-    print("[💾] Параметры HOG сохранены в 'hog_params.pkl'")
+    print("[💾] Модель и параметры сохранены")
+    
     return clf
 
 def show_examples(folder, n=3):
     images = []
     for filename in os.listdir(folder)[:n]:
         img_path = os.path.join(folder, filename)
-        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        if img is not None:
-            images.append(img)
+        try:
+            with Image.open(img_path) as img:
+                img = img.convert('L')
+                images.append(np.array(img))
+        except:
+            continue
         if len(images) >= n:
             break
 
@@ -186,15 +221,15 @@ def show_examples(folder, n=3):
     plt.show()
 
 if __name__ == "__main__":
-    print("Примеры изображений из slut:")
-    show_examples(SLUT_DIR)
+    #print("Примеры изображений из slut:")
+    #show_examples(SLUT_DIR)
 
-    print("\nПримеры изображений из regular:")
-    show_examples(REGULAR_DIR)
+    #print("\nПримеры изображений из regular:")
+    #show_examples(REGULAR_DIR)
 
     print("\nНачинаем оптимизацию гиперпараметров...")
     study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=20, n_jobs=1)
+    study.optimize(objective, n_trials=30, n_jobs=1)
 
     print("\n[🏆] Лучшие параметры:")
     print(study.best_params)
