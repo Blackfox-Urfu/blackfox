@@ -1,5 +1,4 @@
 # Игнорирование конфиденциальных файлов
-README.md
 anon.session-journal
 client.session
 keys.py
