@@ -31,3 +31,4 @@ best_hog_model.pkl
 hog_params.pkl
 posts_data.csv
 hog_visualizations/
+model/
