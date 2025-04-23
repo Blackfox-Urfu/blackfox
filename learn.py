@@ -1,260 +1,295 @@
 import os
-import gc
-import cv2
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import models, transforms
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import optuna
+from PIL import Image
+from sklearn.metrics import (
+    roc_auc_score, 
+    accuracy_score, 
+    precision_score, 
+    recall_score, 
+    f1_score,
+    classification_report,
+    average_precision_score,
+    confusion_matrix,
+    roc_curve,
+    precision_recall_curve
+)
 import joblib
+from tqdm import tqdm
+import onnx
+import onnxruntime as ort
+from torch.quantization import quantize_dynamic
+import time 
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-from skimage.feature import hog
-from skimage import exposure
-from sklearn.svm import LinearSVC
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import classification_report
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from imblearn.over_sampling import SMOTE
-from imblearn.under_sampling import RandomUnderSampler
-from imblearn.pipeline import Pipeline as ImbPipeline
-from sklearn.utils.class_weight import compute_class_weight
-from collections import Counter
-from PIL import ImageOps
-from PIL import Image 
+import seaborn as sns
 
-# Пути к данным
-SLUT_DIR = 'data/slut'
-REGULAR_DIR = 'data/regular'
-HOG_VIS_DIR = 'hog_visualizations'  # Папка для сохранения визуализаций HOG
+# Конфигурация
+DEVICE = torch.device('cuda')
+IMG_SIZE = 224
+BATCH_SIZE = 512  
+EPOCHS = 15
+ONNX_PATH = 'model/nsfw_resnet34.onnx'
+os.makedirs(os.path.dirname(ONNX_PATH), exist_ok=True)  
 
-# Убедимся, что папка для визуализаций существует
-os.makedirs(HOG_VIS_DIR, exist_ok=True)
+QUANTIZED_MODEL_PATH = 'model/nsfw_resnet34_quantized.pth'
+os.makedirs(os.path.dirname(QUANTIZED_MODEL_PATH), exist_ok=True)  
 
-def load_image(img_path, label):
-    try:
-        with Image.open(img_path) as img:
-            img = img.convert('L')  # Преобразуем в оттенки серого
-            img_array = np.array(img)
-            return img_array, label
-    except Exception as e:
-        print(f"Ошибка при обработке {img_path}: {e}")
-        return None, None
+RESULTS_DIR = 'data/result_resnet'
+os.makedirs(RESULTS_DIR, exist_ok=True)  
 
 
-def process_single_image(args, params):
-    img_path, label = args
-    img, label = load_image(img_path, label)
-    if img is None:
-        return None
-    try:
-        img_pil = Image.fromarray(img)
-        img_resized = img_pil.resize((params['resize'], params['resize']), Image.Resampling.LANCZOS)
-        img_np = np.array(img_resized)
+# Аугментация (усиленная)
+train_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.RandomRotation(15),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
-        features = hog(
-            img_np,
-            orientations=params['orientations'],
-            pixels_per_cell=(params['pixels_per_cell'], params['pixels_per_cell']),
-            cells_per_block=(params['cells_per_block'], params['cells_per_block']),
-            block_norm='L2-Hys'
-        )
-        return features, label
-    except Exception as e:
-        print(f"Ошибка при обработке HOG {img_path}: {e}")
-        return None
+val_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
-def process_images_in_directory(folder, label, params, max_workers=4):
-    filepaths = [os.path.join(folder, f) for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
-    features = []
-    labels = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_single_image, (fp, label), params) for fp in filepaths]
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                feat, lbl = result
-                features.append(feat)
-                labels.append(lbl)
-    return np.array(features, dtype=np.float32), np.array(labels)
+class NSFWDataset(Dataset):
+    def __init__(self, filepaths, labels, transform=None, cache_ram=True):
+        self.filepaths = filepaths
+        self.labels = labels
+        self.transform = transform
+        self.cache = {}
+        self.cache_ram = cache_ram and (len(filepaths) * IMG_SIZE * IMG_SIZE * 3 * 4 < 50e9)  
 
-def optimize_memory_usage():
-    gc.collect()
+    def __len__(self):
+        return len(self.filepaths)
 
-def visualize_hog(img, params, out_filename=None):
-    img_pil = Image.fromarray(img)
-    img_resized = img_pil.resize((params['resize'], params['resize']), Image.Resampling.LANCZOS)
-    img_np = np.array(img_resized)
-
-    _, hog_image = hog(
-        img_np,
-        orientations=params['orientations'],
-        pixels_per_cell=(params['pixels_per_cell'], params['pixels_per_cell']),
-        cells_per_block=(params['cells_per_block'], params['cells_per_block']),
-        block_norm='L2-Hys',
-        visualize=True
-    )
-    hog_image = exposure.rescale_intensity(hog_image, in_range=(0, 10))
-
-    plt.figure(figsize=(12, 6))
-    plt.subplot(1, 2, 1)
-    plt.imshow(img, cmap='gray')
-    plt.title('Original Image')
-    plt.axis('off')
-
-    plt.subplot(1, 2, 2)
-    plt.imshow(hog_image, cmap='gray')
-    plt.title('HOG Features')
-    plt.axis('off')
-
-    plt.tight_layout()
-
-    if out_filename:
-        plt.savefig(os.path.join(HOG_VIS_DIR, out_filename), bbox_inches='tight')
-        plt.close()
-    else:
-        plt.show()
-
-def objective(trial):
-    hog_params = {
-        'resize': trial.suggest_categorical('resize', [64, 96]),
-        'orientations': trial.suggest_int('orientations', 6, 12),
-        'pixels_per_cell': trial.suggest_categorical('pixels_per_cell', [8, 16]),
-        'cells_per_block': trial.suggest_categorical('cells_per_block', [2, 3])
-    }
-    C = trial.suggest_float('C', 0.01, 10.0, log=True)
-    balance_method = trial.suggest_categorical('balance_method', ['class_weight', 'smote', 'under_sampling'])
-
-    try:
-        X_slut, y_slut = process_images_in_directory(SLUT_DIR, 1, hog_params)
-        X_regular, y_regular = process_images_in_directory(REGULAR_DIR, 0, hog_params)
-
-        if len(X_slut) == 0 or len(X_regular) == 0:
-            raise optuna.exceptions.TrialPruned()
-
-        X = np.vstack((X_slut, X_regular))
-        y = np.concatenate((y_slut, y_regular))
-
-        # Логирование распределения классов
-        print(f"\nРаспределение классов до балансировки: {Counter(y)}")
-        
-        if balance_method == 'class_weight':
-            classes = np.unique(y)
-            weights = compute_class_weight('balanced', classes=classes, y=y)
-            class_weights = dict(zip(classes, weights))
-            clf = LinearSVC(C=C, max_iter=10000, dual=False, class_weight=class_weights)
+    def __getitem__(self, idx):
+        if idx in self.cache:
+            img = self.cache[idx]
         else:
-            clf = LinearSVC(C=C, max_iter=10000, dual=False)
-            if balance_method == 'smote':
-                pipeline = ImbPipeline([
-                    ('smote', SMOTE(random_state=42)),
-                    ('svm', clf)
-                ])
-            else:  # under_sampling
-                pipeline = ImbPipeline([
-                    ('under', RandomUnderSampler(random_state=42)),
-                    ('svm', clf)
-                ])
-            clf = pipeline
+            img = Image.open(self.filepaths[idx]).convert('RGB')
+            if self.cache_ram:
+                self.cache[idx] = img
+        if self.transform:
+            img = self.transform(img)
+        return img, self.labels[idx]
 
-        scores = cross_val_score(clf, X, y, cv=3, scoring='f1_macro')
-        return np.mean(scores)
-
-    except Exception as e:
-        print(f"Ошибка в trial: {e}")
-        raise optuna.exceptions.TrialPruned()
-
-def train_final_model(best_params):
-    X_slut, y_slut = process_images_in_directory(SLUT_DIR, 1, best_params)
-    X_regular, y_regular = process_images_in_directory(REGULAR_DIR, 0, best_params)
-
-    X = np.vstack((X_slut, X_regular))
-    y = np.concatenate((y_slut, y_regular))
-
-    print(f"\nФинальное распределение классов: {Counter(y)}")
+def save_metrics_report(y_true, y_pred, y_scores, filename='metrics_report.txt'):
+    report = classification_report(y_true, y_pred)
+    roc_auc = roc_auc_score(y_true, y_scores)
+    ap_score = average_precision_score(y_true, y_scores)
     
-    # Применяем лучший метод балансировки
-    if best_params.get('balance_method') == 'class_weight':
-        classes = np.unique(y)
-        weights = compute_class_weight('balanced', classes=classes, y=y)
-        class_weights = dict(zip(classes, weights))
-        clf = LinearSVC(C=best_params['C'], max_iter=10000, dual=False, class_weight=class_weights)
-    else:
-        clf = LinearSVC(C=best_params['C'], max_iter=10000, dual=False)
-        if best_params.get('balance_method') == 'smote':
-            X, y = SMOTE(random_state=42).fit_resample(X, y)
-        else:  # under_sampling
-            X, y = RandomUnderSampler(random_state=42).fit_resample(X, y)
+    with open(os.path.join(RESULTS_DIR, filename), 'w') as f:
+        f.write("Classification Report:\n")
+        f.write(report)
+        f.write(f"\nROC-AUC Score: {roc_auc:.4f}")
+        f.write(f"\nAverage Precision Score: {ap_score:.4f}")
     
-    print(f"Распределение после балансировки: {Counter(y)}")
+    return report, roc_auc, ap_score  # <-- Добавьте эту строку
 
+
+def plot_confusion_matrix(y_true, y_pred, filename='confusion_matrix.png'):
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['Not-NSFW', 'NSFW'], 
+                yticklabels=['Not-NSFW', 'NSFW'])
+    plt.title('Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.savefig(os.path.join(RESULTS_DIR, filename))
+    plt.close()
+
+def plot_roc_curve(y_true, y_scores, filename='roc_curve.png'):
+    fpr, tpr, _ = roc_curve(y_true, y_scores)
+    plt.figure(figsize=(8, 6))
+    plt.plot(fpr, tpr, label=f'ROC Curve (AUC = {roc_auc_score(y_true, y_scores):.2f})')
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic')
+    plt.legend()
+    plt.savefig(os.path.join(RESULTS_DIR, filename))
+    plt.close()
+
+def plot_precision_recall_curve(y_true, y_scores, filename='precision_recall_curve.png'):
+    precision, recall, _ = precision_recall_curve(y_true, y_scores)
+    plt.figure(figsize=(8, 6))
+    plt.plot(recall, precision, label=f'Precision-Recall Curve (AP = {average_precision_score(y_true, y_scores):.2f})')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend()
+    plt.savefig(os.path.join(RESULTS_DIR, filename))
+    plt.close()
+
+
+def load_data():
+    slut_files = [os.path.join('data/slut', f) for f in os.listdir('data/slut')]
+    regular_files = [os.path.join('data/regular', f) for f in os.listdir('data/regular')]
+    X = slut_files + regular_files
+    y = [1] * len(slut_files) + [0] * len(regular_files)
+    return X, y
+
+
+def build_model():
+    model = models.resnet34(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False  # Замораживаем слои
+    
+    model.fc = nn.Sequential(
+        nn.Linear(model.fc.in_features, 512),
+        nn.ReLU(),
+        nn.Dropout(0.3),
+        nn.Linear(512, 1),
+        nn.Sigmoid()
+    )
+    return model.to(DEVICE)
+
+def train_model(model, train_loader, val_loader, optimizer, criterion):
+    best_acc = 0
+    for epoch in range(EPOCHS):
+        model.train()
+        train_loss = 0.0
+        for inputs, labels in tqdm(train_loader, desc=f'Epoch {epoch+1}/{EPOCHS}'):
+            inputs, labels = inputs.to(DEVICE), labels.float().to(DEVICE)
+            optimizer.zero_grad()
+            outputs = model(inputs).squeeze()
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+        
+        val_loss, val_acc = evaluate_model(model, val_loader, criterion)
+        print(f"Epoch {epoch+1}: Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), 'model/best_resnet34.pth')
+    return model
+
+def evaluate_model(model, loader, criterion):
+    model.eval()
+    correct = 0
+    total = 0
+    running_loss = 0.0
+    start_time = time.time()
+
+    with torch.no_grad():
+        for count, (inputs, labels) in enumerate(loader):
+            print(f'[Eval] Batch {count + 1}/{len(loader)}')
+            print(f'        Inputs shape: {inputs.shape}, Labels shape: {labels.shape}')
+
+            inputs, labels = inputs.to(DEVICE), labels.float().to(DEVICE)
+            outputs = model(inputs).squeeze()
+            loss = criterion(outputs, labels)
+            running_loss += loss.item()
+
+            predicted = (outputs > 0.5).float()
+            batch_correct = (predicted == labels).sum().item()
+            batch_total = labels.size(0)
+
+            print(f'        Loss: {loss.item():.4f}, Batch Accuracy: {batch_correct / batch_total:.4f}')
+
+            total += batch_total
+            correct += batch_correct
+
+    elapsed = time.time() - start_time
+    print(f'Finished test in {elapsed:.2f} seconds')
+    print(f'Total Accuracy: {correct / total:.4f}, Avg Loss: {running_loss / len(loader):.4f}')
+
+    return running_loss / len(loader), correct / total
+
+def export_to_onnx(model):
+    dummy_input = torch.randn(1, 3, IMG_SIZE, IMG_SIZE).to(DEVICE)
+    torch.onnx.export(
+        model,
+        dummy_input,
+        ONNX_PATH,
+        opset_version=13,
+        input_names=['input'],
+        output_names=['output'],
+        dynamic_axes={'input': {0: 'batch'}, 'output': {0: 'batch'}}
+    )
+    print(f"ONNX-модель сохранена в {ONNX_PATH}")
+
+def quantize_model(model):
+    model_quantized = quantize_dynamic(
+        model, {nn.Linear}, dtype=torch.qint8
+    )
+    torch.save(model_quantized.state_dict(), QUANTIZED_MODEL_PATH)
+    print(f"Квантованная модель сохранена в {QUANTIZED_MODEL_PATH}")
+    return model_quantized
+
+def test_onnx_inference():
+    ort_session = ort.InferenceSession(ONNX_PATH)
+    dummy_input = np.random.randn(1, 3, IMG_SIZE, IMG_SIZE).astype(np.float32)
+    outputs = ort_session.run(['output'], {'input': dummy_input})
+    print("ONNX inference test:", outputs[0].shape)
+
+def main():
+    X, y = load_data()
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    clf.fit(X_train, y_train)
-
-    y_pred = clf.predict(X_test)
-    print("\n[📊] Classification Report:")
-    print(classification_report(y_test, y_pred))
-
-    # Сохраняем модель и параметры
-    joblib.dump(clf, 'best_hog_model.pkl')
-    joblib.dump(best_params, 'hog_params.pkl')
-    print("[💾] Модель и параметры сохранены")
     
-    return clf
+    train_dataset = NSFWDataset(X_train, y_train, train_transform, cache_ram=True)
+    test_dataset = NSFWDataset(X_test, y_test, val_transform, cache_ram=True)
+    
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=12)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
+    
+    model = build_model()
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    
+    print("Начало обучения...")
+    model = train_model(model, train_loader, test_loader, optimizer, criterion)
+    
+    print("\nТестирование модели...")
+    y_true, y_pred, y_scores = [], [], []
+    model.eval()
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            inputs = inputs.to(DEVICE)
+            outputs = model(inputs).squeeze().cpu().numpy()
+            y_scores.extend(outputs)
+            y_pred.extend((outputs > 0.5).astype(int))
+            y_true.extend(labels.numpy())
+    
+    # Сохранение метрик и графиков
+    report, roc_auc, ap_score = save_metrics_report(y_true, y_pred, y_scores)
+    plot_confusion_matrix(y_true, y_pred)
+    plot_roc_curve(y_true, y_scores)
+    plot_precision_recall_curve(y_true, y_scores)
+    
+    print("\nClassification Report:")
+    print(report)
+    print(f"\nROC-AUC Score: {roc_auc:.4f}")
+    print(f"Average Precision Score: {ap_score:.4f}")
 
-def show_examples(folder, n=3):
-    images = []
-    for filename in os.listdir(folder)[:n]:
-        img_path = os.path.join(folder, filename)
-        try:
-            with Image.open(img_path) as img:
-                img = img.convert('L')
-                images.append(np.array(img))
-        except:
-            continue
-        if len(images) >= n:
-            break
-
-    plt.figure(figsize=(15, 5))
-    for i, img in enumerate(images, 1):
-        plt.subplot(1, n, i)
-        plt.imshow(img, cmap='gray')
-        plt.title(os.path.basename(folder))
-        plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+    # Экспорт и квантование
+    export_to_onnx(model)
+    quantized_model = quantize_model(model)
+    test_onnx_inference()
+    
+    # Отчет
+    y_true, y_pred = [], []
+    model.eval()
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            inputs = inputs.to(DEVICE)
+            outputs = (model(inputs).squeeze() > 0.5).float().cpu().numpy()
+            y_pred.extend(outputs)
+            y_true.extend(labels.numpy())
+    
+    print("\nClassification Report:")
+    print(classification_report(y_true, y_pred))
 
 if __name__ == "__main__":
-    #print("Примеры изображений из slut:")
-    #show_examples(SLUT_DIR)
-
-    #print("\nПримеры изображений из regular:")
-    #show_examples(REGULAR_DIR)
-
-    print("\nНачинаем оптимизацию гиперпараметров...")
-    study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=30, n_jobs=1)
-
-    print("\n[🏆] Лучшие параметры:")
-    print(study.best_params)
-    print(f"[🎯] Лучший f1_macro: {study.best_value:.4f}")
-
-    best_params = study.best_params
-    best_params['C'] = study.best_params['C']
-    clf = train_final_model(best_params)
-
-    # Визуализация HOG
-    print("\nВизуализация HOG для примеров:")
-
-    slut_example = next((os.path.join(SLUT_DIR, f) for f in os.listdir(SLUT_DIR)
-                         if os.path.isfile(os.path.join(SLUT_DIR, f))), None)
-    regular_example = next((os.path.join(REGULAR_DIR, f) for f in os.listdir(REGULAR_DIR)
-                            if os.path.isfile(os.path.join(REGULAR_DIR, f))), None)
-
-    if slut_example:
-        img = cv2.imread(slut_example, cv2.IMREAD_GRAYSCALE)
-        if img is not None:
-            print("\nПример из slut:")
-            visualize_hog(img, best_params, out_filename='slut_example_hog.png')
-
-    if regular_example:
-        img = cv2.imread(regular_example, cv2.IMREAD_GRAYSCALE)
-        if img is not None:
-            print("\nПример из regular:")
-            visualize_hog(img, best_params, out_filename='regular_example_hog.png')
+    main()
