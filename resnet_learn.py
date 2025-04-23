@@ -32,7 +32,7 @@ import seaborn as sns
 DEVICE = torch.device('cuda')
 IMG_SIZE = 224
 BATCH_SIZE = 256  
-EPOCHS = 15
+EPOCHS = 30
 ONNX_PATH = 'model/nsfw_resnet34.onnx'
 os.makedirs(os.path.dirname(ONNX_PATH), exist_ok=True)  
 

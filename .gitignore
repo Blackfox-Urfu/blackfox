@@ -33,3 +33,4 @@ best_hog_model.pkl
 hog_params.pkl
 hog_visualizations/
 model/
+best_resnet34.pth
