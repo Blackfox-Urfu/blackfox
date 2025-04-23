@@ -32,3 +32,4 @@ random_forest_structure.csv
 best_hog_model.pkl
 hog_params.pkl
 hog_visualizations/
+model/

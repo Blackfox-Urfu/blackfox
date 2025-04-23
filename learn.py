@@ -31,7 +31,7 @@ import seaborn as sns
 # Конфигурация
 DEVICE = torch.device('cuda')
 IMG_SIZE = 224
-BATCH_SIZE = 512  
+BATCH_SIZE = 256  
 EPOCHS = 15
 ONNX_PATH = 'model/nsfw_resnet34.onnx'
 os.makedirs(os.path.dirname(ONNX_PATH), exist_ok=True)  
@@ -65,7 +65,7 @@ class NSFWDataset(Dataset):
         self.labels = labels
         self.transform = transform
         self.cache = {}
-        self.cache_ram = cache_ram and (len(filepaths) * IMG_SIZE * IMG_SIZE * 3 * 4 < 50e9)  
+        self.cache_ram = cache_ram and (len(filepaths) * IMG_SIZE * IMG_SIZE * 3 * 4 < 30e9)  
 
     def __len__(self):
         return len(self.filepaths)
