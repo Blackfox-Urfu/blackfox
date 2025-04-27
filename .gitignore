@@ -9,7 +9,6 @@ bot.session
 forward_bot.session
 anon.session
 *.swp
-pyproject.toml
 data/
 .env
 results/

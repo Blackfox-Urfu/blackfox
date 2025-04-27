@@ -35,8 +35,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 IMG_SIZE = 224
 BATCH_SIZE = 256  
-EPOCHS = 50  # Увеличили количество эпох для ранней остановки
-PATIENCE = 5  # Количество эпох без улучшений для ранней остановки
+EPOCHS = 50  
+PATIENCE = 5 
 ONNX_PATH = 'model/nsfw_resnet34.onnx'
 os.makedirs(os.path.dirname(ONNX_PATH), exist_ok=True)  
 
