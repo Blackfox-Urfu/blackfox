@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, transforms
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import numpy as np
 from PIL import Image
 from sklearn.metrics import (
@@ -27,12 +27,16 @@ import time
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import seaborn as sns
+from collections import Counter
+from torch.cuda.amp import GradScaler, autocast
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # Конфигурация
-DEVICE = torch.device('cuda')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 IMG_SIZE = 224
 BATCH_SIZE = 256  
-EPOCHS = 30
+EPOCHS = 50  # Увеличили количество эпох для ранней остановки
+PATIENCE = 5  # Количество эпох без улучшений для ранней остановки
 ONNX_PATH = 'model/nsfw_resnet34.onnx'
 os.makedirs(os.path.dirname(ONNX_PATH), exist_ok=True)  
 
@@ -42,13 +46,14 @@ os.makedirs(os.path.dirname(QUANTIZED_MODEL_PATH), exist_ok=True)
 RESULTS_DIR = 'data/result_resnet'
 os.makedirs(RESULTS_DIR, exist_ok=True)  
 
-
 # Аугментация (усиленная)
 train_transform = transforms.Compose([
     transforms.Resize((IMG_SIZE, IMG_SIZE)),
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomRotation(15),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+    transforms.RandomPerspective(distortion_scale=0.2, p=0.5),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
@@ -92,8 +97,7 @@ def save_metrics_report(y_true, y_pred, y_scores, filename='metrics_report.txt')
         f.write(f"\nROC-AUC Score: {roc_auc:.4f}")
         f.write(f"\nAverage Precision Score: {ap_score:.4f}")
     
-    return report, roc_auc, ap_score  # <-- Добавьте эту строку
-
+    return report, roc_auc, ap_score
 
 def plot_confusion_matrix(y_true, y_pred, filename='confusion_matrix.png'):
     cm = confusion_matrix(y_true, y_pred)
@@ -130,22 +134,30 @@ def plot_precision_recall_curve(y_true, y_scores, filename='precision_recall_cur
     plt.savefig(os.path.join(RESULTS_DIR, filename))
     plt.close()
 
-
 def load_data():
-    slut_files = [os.path.join('data/slut', f) for f in os.listdir('data/slut')]
-    regular_files = [os.path.join('data/regular', f) for f in os.listdir('data/regular')]
+    slut_files = [os.path.join('data/slut', f) for f in os.listdir('data/slut') if f.endswith(('.jpg', '.jpeg', '.png'))]
+    regular_files = [os.path.join('data/regular', f) for f in os.listdir('data/regular') if f.endswith(('.jpg', '.jpeg', '.png'))]
     X = slut_files + regular_files
     y = [1] * len(slut_files) + [0] * len(regular_files)
     return X, y
 
-
 def build_model():
-    model = models.resnet34(pretrained=True)
-    for param in model.parameters():
-        param.requires_grad = False  # Замораживаем слои
+    # Исправленная инициализация модели
+    model = models.resnet34(weights=models.ResNet34_Weights.IMAGENET1K_V1)
     
+    # Прогрессивное замораживание
+    for name, param in model.named_parameters():
+        if not name.startswith('layer4') and not name.startswith('fc'):
+            param.requires_grad = False
+    
+    # Улучшенная головная часть
     model.fc = nn.Sequential(
-        nn.Linear(model.fc.in_features, 512),
+        nn.Linear(model.fc.in_features, 1024),
+        nn.BatchNorm1d(1024),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+        nn.Linear(1024, 512),
+        nn.BatchNorm1d(512),
         nn.ReLU(),
         nn.Dropout(0.3),
         nn.Linear(512, 1),
@@ -153,59 +165,141 @@ def build_model():
     )
     return model.to(DEVICE)
 
+def unfreeze_layers(model, epoch, total_epochs):
+    """Прогрессивное размораживание слоев в процессе обучения"""
+    if epoch == total_epochs // 3:
+        print("\nРазмораживаем layer3...")
+        for name, param in model.named_parameters():
+            if name.startswith('layer3'):
+                param.requires_grad = True
+                
+    elif epoch == 2 * total_epochs // 3:
+        print("\nРазмораживаем layer2...")
+        for name, param in model.named_parameters():
+            if name.startswith('layer2'):
+                param.requires_grad = True
+
+def get_class_weights(labels):
+    class_counts = Counter(labels)
+    total_samples = len(labels)
+    weight_per_class = {cls: total_samples / (len(class_counts) * count) for cls, count in class_counts.items()}
+    weights = [weight_per_class[cls] for cls in labels]
+    return torch.DoubleTensor(weights)
+
 def train_model(model, train_loader, val_loader, optimizer, criterion):
+    
+    scaler = torch.amp.GradScaler()
+    
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', patience=2, factor=0.1)
     best_acc = 0
+    no_improve = 0
+    history = {'train_loss': [], 'val_loss': [], 'val_acc': []}
+
     for epoch in range(EPOCHS):
         model.train()
         train_loss = 0.0
+        
+        # Прогрессивное размораживание
+        unfreeze_layers(model, epoch, EPOCHS)
+        
         for inputs, labels in tqdm(train_loader, desc=f'Epoch {epoch+1}/{EPOCHS}'):
             inputs, labels = inputs.to(DEVICE), labels.float().to(DEVICE)
             optimizer.zero_grad()
-            outputs = model(inputs).squeeze()
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            
+            # Исправленный autocast
+            with torch.cuda.amp.autocast():
+                outputs = model(inputs).squeeze()
+                loss = criterion(outputs, labels)
+            
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            
             train_loss += loss.item()
         
         val_loss, val_acc = evaluate_model(model, val_loader, criterion)
-        print(f"Epoch {epoch+1}: Train Loss: {train_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        scheduler.step(val_acc)
         
+        # Сохраняем историю
+        history['train_loss'].append(train_loss/len(train_loader))
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc)
+        
+        print(f"Epoch {epoch+1}: Train Loss: {train_loss/len(train_loader):.4f}, "
+              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, "
+              f"LR: {optimizer.param_groups[0]['lr']:.2e}")
+        
+        # Ранняя остановка
         if val_acc > best_acc:
             best_acc = val_acc
+            no_improve = 0
             torch.save(model.state_dict(), 'model/best_resnet34.pth')
+        else:
+            no_improve += 1
+            if no_improve >= PATIENCE:
+                print(f"\nEarly stopping at epoch {epoch+1}")
+                break
+    
+    plot_training_history(history)
     return model
+
+def plot_training_history(history):
+    plt.figure(figsize=(12, 4))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(history['train_loss'], label='Train Loss')
+    plt.plot(history['val_loss'], label='Val Loss')
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(history['val_acc'], label='Val Accuracy')
+    plt.title('Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    
+    plt.savefig(os.path.join(RESULTS_DIR, 'training_history.png'))
+    plt.close()
 
 def evaluate_model(model, loader, criterion):
     model.eval()
     correct = 0
     total = 0
     running_loss = 0.0
-    start_time = time.time()
+    y_true, y_pred, y_scores = [], [], []
 
     with torch.no_grad():
-        for count, (inputs, labels) in enumerate(loader):
-            print(f'[Eval] Batch {count + 1}/{len(loader)}')
-            print(f'        Inputs shape: {inputs.shape}, Labels shape: {labels.shape}')
-
+        for inputs, labels in loader:
             inputs, labels = inputs.to(DEVICE), labels.float().to(DEVICE)
+            
             outputs = model(inputs).squeeze()
             loss = criterion(outputs, labels)
             running_loss += loss.item()
 
             predicted = (outputs > 0.5).float()
-            batch_correct = (predicted == labels).sum().item()
-            batch_total = labels.size(0)
+            correct += (predicted == labels).sum().item()
+            total += labels.size(0)
+            
+            y_true.extend(labels.cpu().numpy())
+            y_pred.extend(predicted.cpu().numpy())
+            y_scores.extend(outputs.cpu().numpy())
 
-            print(f'        Loss: {loss.item():.4f}, Batch Accuracy: {batch_correct / batch_total:.4f}')
-
-            total += batch_total
-            correct += batch_correct
-
-    elapsed = time.time() - start_time
-    print(f'Finished test in {elapsed:.2f} seconds')
-    print(f'Total Accuracy: {correct / total:.4f}, Avg Loss: {running_loss / len(loader):.4f}')
-
-    return running_loss / len(loader), correct / total
+    val_loss = running_loss / len(loader)
+    val_acc = correct / total
+    
+    # Дополнительные метрики
+    roc_auc = roc_auc_score(y_true, y_scores)
+    f1 = f1_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+    
+    print(f"Validation Metrics - Loss: {val_loss:.4f}, Acc: {val_acc:.4f}, "
+          f"ROC-AUC: {roc_auc:.4f}, F1: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}")
+    
+    return val_loss, val_acc
 
 def export_to_onnx(model):
     dummy_input = torch.randn(1, 3, IMG_SIZE, IMG_SIZE).to(DEVICE)
@@ -236,22 +330,52 @@ def test_onnx_inference():
 
 def main():
     X, y = load_data()
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    # Анализ распределения классов
+    print("Class distribution:", Counter(y))
+    
+    # Разделение данных с сохранением баланса классов
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    
+    # Создание WeightedRandomSampler для балансировки классов
+    weights = get_class_weights(y_train)
+    sampler = WeightedRandomSampler(weights, len(weights))
     
     train_dataset = NSFWDataset(X_train, y_train, train_transform, cache_ram=True)
     test_dataset = NSFWDataset(X_test, y_test, val_transform, cache_ram=True)
     
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=12)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=BATCH_SIZE, 
+        sampler=sampler,
+        num_workers=8,
+        pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=BATCH_SIZE,
+        num_workers=8,
+        pin_memory=True
+    )
     
     model = build_model()
-    criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    
+    # Добавляем веса классов в функцию потерь
+    pos_weight = torch.tensor([3.5]).to(DEVICE).to(DEVICE)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    
+    # Разные learning rates для разных слоев
+    optimizer = optim.AdamW([
+        {'params': [p for n, p in model.named_parameters() if not n.startswith('fc')], 'lr': 1e-5},
+        {'params': model.fc.parameters(), 'lr': 1e-4}
+    ], weight_decay=1e-4)
     
     print("Начало обучения...")
     model = train_model(model, train_loader, test_loader, optimizer, criterion)
     
-    print("\nТестирование модели...")
+    print("\nФинальное тестирование модели...")
     y_true, y_pred, y_scores = [], [], []
     model.eval()
     with torch.no_grad():
@@ -277,19 +401,6 @@ def main():
     export_to_onnx(model)
     quantized_model = quantize_model(model)
     test_onnx_inference()
-    
-    # Отчет
-    y_true, y_pred = [], []
-    model.eval()
-    with torch.no_grad():
-        for inputs, labels in test_loader:
-            inputs = inputs.to(DEVICE)
-            outputs = (model(inputs).squeeze() > 0.5).float().cpu().numpy()
-            y_pred.extend(outputs)
-            y_true.extend(labels.numpy())
-    
-    print("\nClassification Report:")
-    print(classification_report(y_true, y_pred))
 
 if __name__ == "__main__":
     main()
