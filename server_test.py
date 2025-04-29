@@ -26,8 +26,8 @@ try:
     # Текстовая модель (игнорируем предупреждения о версиях)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UserWarning)
-        model = joblib.load("randfor_model.pkl")
-        vectorizer = joblib.load("randfor_vectorizer.pkl")
+        #model = joblib.load("randfor_model.pkl")
+        #vectorizer = joblib.load("randfor_vectorizer.pkl")
     logger.info("Текстовая модель успешно загружена")
 except Exception as e:
     logger.error(f"Ошибка загрузки текстовой модели: {e}")
@@ -38,7 +38,12 @@ try:
     # Инициализация модели
     resnet_model = models.resnet34(pretrained=False)
     resnet_model.fc = nn.Sequential(
-        nn.Linear(resnet_model.fc.in_features, 512),
+        nn.Linear(resnet_model.fc.in_features, 1024),
+        nn.BatchNorm1d(1024),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+        nn.Linear(1024, 512),
+        nn.BatchNorm1d(512),
         nn.ReLU(),
         nn.Dropout(0.3),
         nn.Linear(512, 1),

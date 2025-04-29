@@ -2,3 +2,11 @@ for file in *.{jpg,jpeg,png,webp}; do
     echo "Processing file: $file"
     curl -s -X POST "http://localhost:8000/api/classify_image/" -F "file=@$file"
 done
+
+
+
+setopt extendedglob                                               
+for file in *.jpg; do
+    echo "Processing file: $file"
+    curl -s -X POST "http://localhost:8000/api/classify_image/" -F "file=@$file"
+done
