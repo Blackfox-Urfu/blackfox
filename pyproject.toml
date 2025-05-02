@@ -1,0 +1,21 @@
+[project]
+name = "blackfox"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "unser229",email = "nzlobin041@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "scikit-learn (>=1.6.1,<2.0.0)",
+    "joblib (>=1.4.2,<2.0.0)",
+    "optuna (>=4.3.0,<5.0.0)",
+    "nltk (>=3.9.1,<4.0.0)",
+    "torch (>=2.7.0,<3.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

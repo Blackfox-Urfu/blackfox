@@ -32,3 +32,5 @@ best_hog_model.pkl
 best_resnet34.pth
 hog_params.pkl
 model/
+result_torch_text/
+temp_best_model_trial_14.pth
