@@ -10,7 +10,6 @@ forward_bot.session
 poetry.lock
 anon.session
 *.swp
-pyproject.toml
 data/
 .env
 results/
@@ -27,3 +26,9 @@ tdlib/
 regular_messages.csv
 advertisements.csv
 tdlib_auth.log
+hog_visualizations/
+catboost_info/
+best_hog_model.pkl
+best_resnet34.pth
+hog_params.pkl
+model/
