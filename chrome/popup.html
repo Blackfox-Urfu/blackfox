@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Настройки расширения</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Левая колонка с настройками -->
+        <div class="left-column">
+            <h1>Настройки</h1>
+            
+            <div class="settings-section fade-in">
+                <h2>Способ отображения рекламы</h2>
+                <select id="displayMode">
+                    <option value="highlight">Пометка красным</option>
+                    <option value="hide">Полное скрытие</option>
+                    <option value="partial">Полупрозрачное отображение</option>
+                    <option value="prediction">Только предсказание</option>
+                </select>
+            </div>
+
+            <div class="settings-section fade-in">
+                <h2>Порог определения рекламы</h2>
+                <div class="threshold-container">
+                    <input type="range" id="thresholdSlider" min="0" max="100" value="50">
+                    <input type="number" id="thresholdInput" min="0" max="1" step="0.01" value="0.50">
+                </div>
+            </div>
+
+            <div class="settings-section fade-in">
+                <h2>Управление данными</h2>
+                <div class="import-export-container">
+                    <button id="exportBtn" class="action-btn">Экспортировать список каналов</button>
+                    <button id="importBtn" class="action-btn">Импортировать список каналов</button>
+                    <input type="file" id="importFile" accept=".json" style="display: none;">
+                </div>
+            </div>
+        </div>
+
+        <!-- Правая колонка со списком каналов -->
+        <div class="right-column">
+            <h1>Каналы</h1>
+            
+            <div class="channel-search">
+                <input type="text" id="channelSearch" placeholder="Поиск по вашим каналам...">
+            </div>
+
+            <div class="channel-list-container">
+                <ul id="channelList"></ul>
+            </div>
+
+            <button id="addButton" class="add-channel-btn fade-in">Добавить новый канал</button>
+        </div>
+    </div>
+    <script src="popup.js" defer></script>
+</body>
+</html>
