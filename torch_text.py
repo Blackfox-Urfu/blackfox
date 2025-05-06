@@ -544,7 +544,19 @@ if __name__ == "__main__":
         if test_f1 > best_test_f1:
             best_test_f1 = test_f1
             try:
-                torch.save(final_model.state_dict(), final_model_path)
+                torch.save({
+                    'model_config': {
+                        'input_size': train_vectors.shape[1],
+                        'hidden_layers': hidden_sizes,
+                        'dropout': best_params['dropout'],
+                        'activation': best_params['activation'],
+                        'use_batch_norm': best_params['use_batch_norm'],
+                        'num_classes': 2
+                    },
+                    'model_state': final_model.state_dict(),
+                    'vectorizer': vectorizer,
+                    'threshold': optimal_threshold
+                }, final_model_path)
                 joblib.dump(vectorizer, vectorizer_path)
                 with open(best_params_path, 'w') as f: json.dump(best_params, f, indent=4)
                 print(f"Epoch {epoch+1}: New best model saved with Test F1: {best_test_f1:.4f} (Model: {final_model_path})")
