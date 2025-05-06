@@ -1,3 +1,69 @@
+Новая структура 
+❯ ls
+app  data  model  poetry.lock  __pycache__  pyproject.toml  README.md  scripts
+❯ tree app
+app
+├── learn
+│   ├── ccatboost.py
+│   ├── hog_slut_detector.py
+│   ├── resnet_learn_slut_detector.py
+│   └── torch_text
+│       ├── model_architecture.py
+│       └── torch_text.py
+└── server_run
+    ├── listen
+    │   ├── config.txt
+    │   └── listner.py
+    ├── main.py
+    └── stream.py
+
+5 directories, 9 files
+❯ tree model scripts
+model
+├── catboost
+│   ├── cat_best_model.pkl
+│   ├── catboost_info
+│   │   ├── catboost_training.json
+│   │   ├── learn
+│   │   │   └── events.out.tfevents
+│   │   ├── learn_error.tsv
+│   │   ├── time_left.tsv
+│   │   └── tmp
+│   │       ├── cat_feature_index.3fbdec4e-b835e3d8-53a85bac-79c418b1.tmp
+│   │       ├── cat_feature_index.6360dc47-8a49a2eb-2d534b50-c997318c.tmp
+│   │       ├── cat_feature_index.63a8bb3e-cacdeaa2-bf04f6ae-4d8ff12c.tmp
+│   │       ├── cat_feature_index.83245cf3-50c7c58-db1cbbde-34c2da1b.tmp
+│   │       ├── cat_feature_index.899c2936-a7544be3-3db4ab41-df33932e.tmp
+│   │       └── cat_feature_index.9980dab9-18af38b0-26cab4b2-a2a0e206.tmp
+│   └── cat_vectorizer.pkl
+├── hog
+│   ├── best_hog_model.pkl
+│   └── hog_params.pkl
+├── random_forest
+│   ├── rand_forest_vis.py
+│   ├── randfor_model.pkl
+│   ├── randfor_vectorizer.pkl
+│   ├── random_forest.py
+│   └── xg_random_forest.py
+├── resnet
+│   ├── best_resnet34.pth
+│   ├── nsfw_resnet34.onnx
+│   ├── nsfw_resnet34_quantized.pth
+│   └── resnet_results
+└── torch_text
+    ├── best_final_model.pth
+    ├── final_best_params.json
+    ├── final_vectorizer.pkl
+    ├── posts_data.csv
+    ├── temp_models
+    └── threshold_analysis.png
+scripts
+├── merge.py
+└── test_cmd.txt
+
+12 directories, 29 files
+Нужно обновить скрипты для новой структуры проекта 
+
 # Классификация сообщений из Telegram
 
 ---
