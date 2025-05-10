@@ -2,7 +2,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "classify") {
         console.log("Запрос на классификацию получен:", request.text); // Лог входящего запроса
 
-        fetch("https://blackfoxus.ru:8000/classify/", {
+        fetch("https://blackfoxus.ru:8000/api/classify_text", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: request.text }),
