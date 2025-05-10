@@ -35,7 +35,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 IMG_SIZE = 224
 BATCH_SIZE = 256  
-EPOCHS = 1
+EPOCHS = 30
 PATIENCE = 5 
 
 # Updated paths to match new structure
