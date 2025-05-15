@@ -1,5 +1,5 @@
 for file in *.{jpg,jpeg,png,webp}; do
-    echo "Processing file: $file"
+    echo "\n \n Processing file: $file "
     curl -s -X POST "http://localhost:8000/api/classify_image/" -F "file=@$file"
 done
 
