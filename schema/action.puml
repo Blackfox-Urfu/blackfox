@@ -1,0 +1,49 @@
+@startuml
+
+actor Пользователь as User
+participant "Telegram Web (Браузер)" as TelegramWeb
+participant "Content Script (Расширение)" as ContentScript
+participant "Background Script (Расширение)" as BackgroundScript
+participant "API Сервер (FastAPI - main.py)" as APIServer
+participant "Text Classifier (Модуль в API)" as TextClassifierLogic
+database "Модель текста (.pth, .pkl)" as TextModelDB
+
+autonumber "<b>[0]"
+
+User -> TelegramWeb: Открывает чат / Получает новое сообщение
+activate TelegramWeb
+
+TelegramWeb -> ContentScript: DOM изменяется (новое сообщение появляется)
+activate ContentScript
+ContentScript -> ContentScript: Обнаруживает новое сообщение \n (например, через MutationObserver)
+ContentScript -> ContentScript: Извлекает текст сообщения
+
+ContentScript -> BackgroundScript: chrome.runtime.sendMessage({action: "classify", text: "Текст сообщения"})
+activate BackgroundScript
+
+BackgroundScript -> APIServer: fetch('https://.../api/classify_text/', {method: 'POST', body: {text: "..."}})
+activate APIServer
+
+APIServer -> TextClassifierLogic: classify(text="...")
+activate TextClassifierLogic
+TextClassifierLogic -> TextModelDB: Загрузка векторизатора и модели \n (если еще не загружены)
+activate TextModelDB
+TextModelDB --> TextClassifierLogic: Векторизатор, модель
+deactivate TextModelDB
+TextClassifierLogic -> TextClassifierLogic: Векторизация текста (TF-IDF)
+TextClassifierLogic -> TextClassifierLogic: Предсказание моделью (MLP)
+TextClassifierLogic --> APIServer: Результат: {is_ad: true, probability: 0.85}
+deactivate TextClassifierLogic
+
+APIServer --> BackgroundScript: HTTP Response (JSON: {is_ad: true, probability: 0.85})
+deactivate APIServer
+
+BackgroundScript -> ContentScript: sendResponse({is_ad: true, probability: 0.85})
+deactivate BackgroundScript
+
+ContentScript -> ContentScript: Получает настройки пользователя \n (режим фильтрации, порог) из chrome.storage
+ContentScript -> TelegramWeb: Применяет фильтрацию к сообщению \n (например, добавляет стиль, скрывает)
+deactivate ContentScript
+deactivate TelegramWeb
+
+@enduml

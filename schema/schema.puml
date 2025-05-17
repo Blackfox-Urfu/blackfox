@@ -1,0 +1,98 @@
+@startuml
+skinparam componentStyle uml2
+skinparam nodesep 20
+skinparam ranksep 30
+
+left to right direction
+
+rectangle "Клиентские приложения" {
+  [Веб-интерфейс (Telegram Web + Расширение)] as WebUI
+  [API клиенты (потенциально)] as APIClients
+}
+
+
+rectangle "Сервер" as Server{
+  rectangle "main.py (FastAPI Server)" {
+    component "API Gateway" as Gateway {
+    [FastAPI App]
+    }
+
+    package "Сервис классификации" {
+      [API Эндпоинты] as APIEndpoints
+      [Text Classifier Logic] as TextClassifier
+      [Image Classifier Logic] as ImageClassifier
+      [Health Check Logic] as HealthCheck
+    }
+  }
+  rectangle "listener.py (TDLib Client)" {
+    [listener] as listener
+    [TDLib Integration] as tdlib
+    database "advertisements.csv" as AdsCSV
+    database "regular_messages.csv" as RegularCSV
+  }
+
+  package "Модели машинного обучения (на сервере)" {
+    [Text Model Files (.pth, .pkl)] as ServerTextModel
+    [Image Model Files (.pth)] as ServerImageModel
+  }
+}
+
+rectangle "Домашний ПК для разработки / Сбор данных" as Home {
+  package "Learn (Обучение моделей)" {
+    [torch_text.py] as TorchTextScript
+    [resnet_learn_slut_detector.py] as ResNetScript
+    [merge.py] as MergeScript
+  }
+  package "Data (Данные для обучения)" {
+    folder "data/raw/slut (images)" as SlutData
+    folder "data/raw/regular (images)" as RegularData
+    folder "data/reklama (text jsons)" as AdData
+    folder "data/nereklama (text jsons)" as NonAdData
+  }
+  package "Model (Артефакты обученных моделей)" {
+    folder "model/torch_text (.pth, .pkl)" as TorchTextModelStore
+    folder "model/resnet (.pth, .onnx)" as ResNetModelStore
+  }
+  [Chrome Extension (Source)] as ChromeExtSource
+  [Telegram Desktop Export (JSON)] as TelegramExport
+}
+
+rectangle "Внешние сервисы " {
+  [Telegram API] as Telegram
+}
+
+' Связи '
+tdlib --> Telegram : (Запросы/Ответы)
+Home --|> Server : (Развертывание моделей, API)
+WebUI --> Gateway : HTTP (Классификация)
+APIClients --> Gateway : HTTP (Классификация)
+
+Gateway --> APIEndpoints
+
+APIEndpoints --> TextClassifier
+APIEndpoints --> ImageClassifier
+APIEndpoints --> HealthCheck
+
+TextClassifier ..> ServerTextModel : (Загрузка)
+ImageClassifier ..> ServerImageModel : (Загрузка)
+
+TelegramExport --> MergeScript : (Входные данные)
+MergeScript --> AdData : (Обработка)
+MergeScript --> NonAdData : (Обработка)
+
+
+TorchTextScript ..> AdData
+TorchTextScript ..> NonAdData
+TorchTextScript ..> TorchTextModelStore : (Сохранение)
+ResNetScript ..> SlutData
+ResNetScript ..> RegularData
+ResNetScript ..> ResNetModelStore : (Сохранение)
+
+
+listener --> AdsCSV : (Запись)
+listener --> RegularCSV : (Запись)
+
+
+ChromeExtSource --|> WebUI : (Установка расширения)
+
+@enduml
