@@ -2,7 +2,6 @@
 skinparam componentStyle uml2
 skinparam nodesep 20
 skinparam ranksep 30
-
 left to right direction
 
 rectangle "Клиентские приложения" {
@@ -10,13 +9,11 @@ rectangle "Клиентские приложения" {
   [API клиенты (потенциально)] as APIClients
 }
 
-
-rectangle "Сервер" as Server{
+rectangle "Сервер" as Server {
   rectangle "main.py (FastAPI Server)" {
     component "API Gateway" as Gateway {
-    [FastAPI App]
+      [FastAPI App]
     }
-
     package "Сервис классификации" {
       [API Эндпоинты] as APIEndpoints
       [Text Classifier Logic] as TextClassifier
@@ -25,12 +22,11 @@ rectangle "Сервер" as Server{
     }
   }
   rectangle "listener.py (TDLib Client)" {
-    [listener] as listener
+    [listener] as ListenerScript
     [TDLib Integration] as tdlib
     database "advertisements.csv" as AdsCSV
     database "regular_messages.csv" as RegularCSV
   }
-
   package "Модели машинного обучения (на сервере)" {
     [Text Model Files (.pth, .pkl)] as ServerTextModel
     [Image Model Files (.pth)] as ServerImageModel
@@ -38,14 +34,19 @@ rectangle "Сервер" as Server{
 }
 
 rectangle "Домашний ПК для разработки / Сбор данных" as Home {
+  package "Скрипты сбора и подготовки данных" {
+    [reddit_data.py] as RedditScript
+    [dubl_check.py] as Dubl_check
+    [merge.py] as MergeScript
+  }
   package "Learn (Обучение моделей)" {
     [torch_text.py] as TorchTextScript
     [resnet_learn_slut_detector.py] as ResNetScript
-    [merge.py] as MergeScript
   }
   package "Data (Данные для обучения)" {
-    folder "data/raw/slut (images)" as SlutData
-    folder "data/raw/regular (images)" as RegularData
+    folder "data/reddit/sfw_images" as RedditSFWStore
+    folder "data/reddit/nsfw_images" as RedditNSFWStore
+    folder "data/raw \n(содержит slut/regular папки, \nочищенные Dubl_check)" as RawDataProcessed
     folder "data/reklama (text jsons)" as AdData
     folder "data/nereklama (text jsons)" as NonAdData
   }
@@ -57,42 +58,49 @@ rectangle "Домашний ПК для разработки / Сбор данн
   [Telegram Desktop Export (JSON)] as TelegramExport
 }
 
-rectangle "Внешние сервисы " {
-  [Telegram API] as Telegram
+rectangle "Внешние сервисы" {
+  [Telegram API] as TelegramAPI
+  [Reddit API] as RedditAPIExternal
 }
 
-' Связи '
-tdlib --> Telegram : (Запросы/Ответы)
-Home --|> Server : (Развертывание моделей, API)
+' Связи Клиент-Сервер '
 WebUI --> Gateway : HTTP (Классификация)
 APIClients --> Gateway : HTTP (Классификация)
-
 Gateway --> APIEndpoints
-
 APIEndpoints --> TextClassifier
 APIEndpoints --> ImageClassifier
 APIEndpoints --> HealthCheck
-
 TextClassifier ..> ServerTextModel : (Загрузка)
 ImageClassifier ..> ServerImageModel : (Загрузка)
 
-TelegramExport --> MergeScript : (Входные данные)
-MergeScript --> AdData : (Обработка)
-MergeScript --> NonAdData : (Обработка)
+' Связи Сбор данных Telegram '
+ListenerScript --> tdlib
+tdlib --> TelegramAPI : (Запросы/Ответы)
+ListenerScript --> AdsCSV : (Запись)
+ListenerScript --> RegularCSV : (Запись)
+TelegramExport --> MergeScript : (Входные данные JSON)
+MergeScript --> AdData : (Обработка, выход .json)
+MergeScript --> NonAdData : (Обработка, выход .json)
 
+' Связи Сбор данных Reddit и Дедупликация '
+RedditScript --> RedditAPIExternal : (Запросы/Ответы)
+RedditScript --> RedditSFWStore : (Сохранение SFW)
+RedditScript --> RedditNSFWStore : (Сохранение NSFW)
 
-TorchTextScript ..> AdData
-TorchTextScript ..> NonAdData
-TorchTextScript ..> TorchTextModelStore : (Сохранение)
-ResNetScript ..> SlutData
-ResNetScript ..> RegularData
-ResNetScript ..> ResNetModelStore : (Сохранение)
+RedditSFWStore ..> RawDataProcessed : (Источник для data/raw)
+RedditNSFWStore ..> RawDataProcessed : (Источник для data/raw)
+Dubl_check ..> RawDataProcessed : (Сканирует и очищает \n data/raw/slut, data/raw/regular \n на месте)
 
+' Связи Обучение моделей '
+TorchTextScript ..> AdData : (Входные данные)
+TorchTextScript ..> NonAdData : (Входные данные)
+TorchTextScript ..> TorchTextModelStore : (Сохранение модели)
 
-listener --> AdsCSV : (Запись)
-listener --> RegularCSV : (Запись)
+ResNetScript ..> RawDataProcessed : (Использует очищенные \n data/raw/slut, data/raw/regular)
+ResNetScript ..> ResNetModelStore : (Сохранение модели)
 
-
+' Развертывание и установка '
+Home --|> Server : (Развертывание моделей, API)
 ChromeExtSource --|> WebUI : (Установка расширения)
 
 @enduml
