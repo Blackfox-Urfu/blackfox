@@ -1,0 +1,104 @@
+/* ====================================================== */
+/* Стили для Telegram Web, применяемые через content.js */
+/* ====================================================== */
+
+/* Стили для предсказаний рекламы над сообщениями */
+.prediction-label {
+    font-size: 10px; /* Чуть меньше для компактности */
+    color: #9e9e9e;  /* Более нейтральный серый по умолчанию */
+    margin-bottom: 3px; /* Небольшой отступ снизу */
+    text-align: left;
+    font-style: italic;
+    display: block; /* Чтобы занимал всю ширину и text-align сработал */
+    line-height: 1.2;
+    padding-left: 2px; /* Небольшой отступ слева, чтобы не прилипало */
+}
+
+.prediction-label.is-ad-positive {
+    color: #f44336; /* Насыщенный красный */
+    font-weight: 500; /* Полужирный */
+}
+
+.prediction-label.is-ad-negative {
+    /* Можно оставить цвет по умолчанию или сделать его чуть светлее/темнее */
+    /* color: #bdbdbd; */
+    font-weight: normal;
+}
+
+/* --- ДОБАВЛЕНО: Стили для предсказаний классификации аватаров --- */
+.avatar-prediction-label {
+    font-size: 10px;
+    color: #9e9e9e;
+    margin-top: 1px; /* Небольшой отступ сверху от метки рекламы */
+    margin-bottom: 3px; /* Отступ снизу, если будут еще элементы или перед текстом сообщения */
+    text-align: left;
+    font-style: italic;
+    display: block;
+    line-height: 1.2;
+    padding-left: 2px;
+}
+
+.avatar-prediction-label.is-nsfw-positive {
+    color: #E53935; /* Такой же красный, как для NSFW рамки или рекламы */
+    font-weight: 500;
+}
+
+.avatar-prediction-label.is-nsfw-negative {
+    /* color: #4CAF50; */ /* Можно сделать зеленым для SFW, если хотите явного выделения */
+    font-weight: normal;
+}
+/* --- КОНЕЦ ДОБАВЛЕННЫХ СТИЛЕЙ --- */
+
+
+/* Стили для кнопки исключения канала в заголовке чата */
+#excludeChannelBtn {
+    margin-left: 10px;
+    padding: 4px 8px; /* Чуть компактнее */
+    font-size: 11px; /* Чуть меньше */
+    cursor: pointer;
+    color: white;
+    border: none;
+    border-radius: 4px; /* Менее скругленные углы */
+    transition: transform 0.1s ease-out, background-color 0.2s ease-out, opacity 0.2s ease-out;
+    /* Добавим немного тени для выделения */
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    font-weight: 500;
+}
+
+#excludeChannelBtn:hover {
+    opacity: 0.85;
+}
+#excludeChannelBtn:active {
+    transform: scale(0.96);
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.1); /* Уменьшаем тень при нажатии */
+}
+
+/* Стили для NSFW аватарок */
+/* Общие классы, которые могут быть добавлены к img.avatar-photo или div.avatar */
+
+/* Режим: Размытие (blur) */
+img.avatar-photo.nsfw-avatar-blur,
+div.avatar.nsfw-avatar-blur > img.avatar-photo { /* Если класс на родительском div */
+    filter: blur(6px) !important; /* !important для переопределения стилей Telegram */
+    transition: filter 0.2s ease-out; /* Плавность для возможного ховера (если добавите) */
+}
+
+/* Режим: Скрыть (hide) */
+img.avatar-photo.nsfw-avatar-hide,
+div.avatar.nsfw-avatar-hide { /* Для контейнеров, если img скрыт */
+    display: none !important;
+}
+
+/* Режим: Рамка (border) */
+img.avatar-photo.nsfw-avatar-border,
+div.avatar.nsfw-avatar-border > img.avatar-photo {
+    border: 2.5px solid #E53935 !important; /* Более точный красный, чуть тоньше рамка */
+    box-sizing: border-box !important; /* Чтобы рамка не увеличивала размер элемента */
+}
+
+/* Дополнительный класс, если нужно как-то пометить SFW аватарки для отладки */
+/*
+img.avatar-photo.sfw-marked {
+    outline: 2px solid lightgreen;
+}
+*/
