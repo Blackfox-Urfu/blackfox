@@ -415,7 +415,7 @@ if __name__ == "__main__":
     print("\nStarting hyperparameter optimization...")
     opt_start_time = time.time()
     try:
-         study.optimize(objective, n_trials=2, timeout=18000, n_jobs=1) # n_trials=1000 было, сократил для теста
+         study.optimize(objective, n_trials=200, timeout=18000, n_jobs=1) 
     except Exception as e:
          print(f"\nOptimization stopped due to an error: {e}")
          import traceback

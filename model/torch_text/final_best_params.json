@@ -1,14 +1,14 @@
 {
     "num_layers": 4,
-    "hidden_size_0": 206,
-    "hidden_size_1": 148,
-    "hidden_size_2": 145,
-    "hidden_size_3": 99,
-    "dropout": 0.45000000000000007,
-    "learning_rate": 0.00012041706526337796,
+    "hidden_size_0": 244,
+    "hidden_size_1": 99,
+    "hidden_size_2": 76,
+    "hidden_size_3": 74,
+    "dropout": 0.5,
+    "learning_rate": 0.00015646668434945757,
     "batch_size": 128,
     "activation": "relu",
-    "use_batch_norm": false,
-    "optimizer": "AdamW",
-    "weight_decay": 0.0003017343829896703
+    "use_batch_norm": true,
+    "optimizer": "RMSprop",
+    "weight_decay": 0.0006273950450518026
 }

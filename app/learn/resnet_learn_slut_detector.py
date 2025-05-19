@@ -37,7 +37,7 @@ print(f"Using device: {DEVICE}")
 
 IMG_SIZE = 224
 BATCH_SIZE = 64 # Уменьшил немного, 256 может быть много для некоторых GPU с ResNet34
-EPOCHS = 1     
+EPOCHS = 30    
 PATIENCE = 5
 
 # Пути
