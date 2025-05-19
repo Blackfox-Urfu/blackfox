@@ -10,71 +10,79 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background: linear-gradient(135deg, var(--primary-color), #1a252f);
     color: var(--text-color);
-    min-height: 100vh;
+    /* min-height: 100vh; Было для полноэкранной, для popup это не нужно, уберем или уменьшим */
     margin: 0;
-    display: flex;
+    /* display: flex; Убрано, т.к. container сам центрируется */
+    padding: 10px; /* Небольшой отступ для всего popup */
+    min-width: 550px; /* Минимальная ширина для двух колонок */
 }
 
 .container {
-    width: 1200px;
+    /* width: 1200px; Слишком много для popup, сделаем адаптивным или фиксированным поменьше */
+    /* max-width: 700px; */ /* Например */
+    width: 100%;
     margin: 0 auto;
-    padding: 20px;
+    /* padding: 20px; Убрано, т.к. body уже имеет padding */
     display: grid;
-    grid-template-columns: 1fr 2fr;
-    gap: 30px;
+    grid-template-columns: 1fr 1.5fr; /* Немного изменил пропорцию для лучшего вида */
+    gap: 20px; /* Уменьшил gap */
 }
 
 /* Левая колонка */
 .left-column {
     background: rgba(255, 255, 255, 0.1);
-    padding: 20px;
-    border-radius: 15px;
+    padding: 15px; /* Уменьшил padding */
+    border-radius: 10px; /* Уменьшил радиус */
     backdrop-filter: blur(10px);
-    box-shadow: 5px 8px 30px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Изменил тень */
 }
 
 /* Правая колонка */
 .right-column {
-    background: #1a252f;
-    padding: 20px;
-    border-radius: 15px;
-    backdrop-filter: blur(10px);
-    box-shadow: -5px 8px 30px rgba(0, 0, 0, 0.2);
+    background: rgba(40, 50, 60, 0.5); /* Чуть светлее фон для правой колонки для контраста */
+    padding: 15px;
+    border-radius: 10px;
+    backdrop-filter: blur(5px); /* Меньше блюра здесь */
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 h1 {
     color: #fff;
-    font-size: 2em;
-    margin-bottom: 30px;
+    font-size: 1.8em; /* Уменьшил */
+    margin-bottom: 20px; /* Уменьшил */
     text-transform: uppercase;
-    letter-spacing: 2px;
+    letter-spacing: 1.5px; /* Уменьшил */
+    text-align: center; /* Центрируем заголовки H1 */
 }
 
 .settings-section {
     background: rgba(255, 255, 255, 0.05);
-    padding: 20px;
-    border-radius: 10px;
-    margin-bottom: 20px;
+    padding: 15px; /* Уменьшил */
+    border-radius: 8px; /* Уменьшил */
+    margin-bottom: 15px; /* Уменьшил */
     backdrop-filter: blur(5px);
 }
 
 h2 {
     color: #fff;
-    font-size: 1.2em;
-    margin-bottom: 15px;
+    font-size: 1.1em; /* Уменьшил */
+    margin-top: 0; /* Убрал верхний отступ у H2 */
+    margin-bottom: 10px; /* Уменьшил */
     text-transform: uppercase;
     letter-spacing: 1px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Разделитель */
+    padding-bottom: 5px; /* Отступ для разделителя */
 }
 
 /* Стили для поиска */
 #channelSearch {
-    width: 100%;
+    width: calc(100% - 22px); /* Учитываем padding инпута */
     padding: 10px;
-    border-radius: 8px;
+    border-radius: 5px; /* Уменьшил */
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: #fff;
-    margin-bottom: 15px;
+    margin-bottom: 10px; /* Уменьшил */
 }
 
 /* Стили для списка каналов */
@@ -82,67 +90,92 @@ h2 {
     list-style-type: none;
     padding: 0;
     margin: 0;
+    max-height: 200px; /* Ограничение высоты с прокруткой */
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.1); /* Рамка для списка */
+    border-radius: 5px;
 }
 
 #channelList li {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px;
+    padding: 8px 10px; /* Уменьшил */
     background: rgba(255, 255, 255, 0.05);
-    margin-bottom: 5px;
-    border-radius: 5px;
+    /* margin-bottom: 5px; Убрано, т.к. есть border-bottom */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08); /* Разделитель между элементами */
     transition: var(--transition);
+    font-size: 0.9em;
+}
+#channelList li:last-child {
+    border-bottom: none;
 }
 
 #channelList li:hover {
-    background: rgba(255, 255, 255, 0.1);
-    transform: translateX(5px);
+    background: rgba(var(--secondary-color), 0.2); /* Подсветка при наведении */
+    transform: translateX(3px); /* Уменьшил сдвиг */
 }
 
-#channelList li button {
+#channelList li button.remove-btn { /* Добавил .remove-btn для специфичности */
     background-color: var(--accent-color);
     color: white;
     border: none;
-    padding: 5px 10px;
+    padding: 4px 8px; /* Уменьшил */
     border-radius: 4px;
     cursor: pointer;
     transition: var(--transition);
-    min-width: 80px;
-    width: 80px;
+    min-width: 70px; /* Уменьшил */
+    /* width: 70px; */
     flex-shrink: 0;
     margin-left: 10px;
+    font-size: 0.8em;
 }
+#channelList li button.remove-btn:hover {
+    background-color: #c0392b; /* Затемнение accent-color при наведении */
+}
+
 
 /* Стили для настройки порога */
 .threshold-container {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 10px; /* Уменьшил */
 }
 
 input[type="range"] {
     flex-grow: 1;
-    height: 5px;
+    height: 8px; /* Чуть толще для удобства */
     -webkit-appearance: none;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.2); /* Сделал чуть заметнее */
     border-radius: 5px;
     cursor: pointer;
+    outline: none;
 }
 
 input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 20px;
-    height: 20px;
+    width: 18px; /* Уменьшил */
+    height: 18px; /* Уменьшил */
     background: var(--secondary-color);
     border-radius: 50%;
     cursor: pointer;
+    border: 2px solid #fff; /* Обводка для лучшей видимости */
+    transition: var(--transition);
+}
+input[type="range"]::-moz-range-thumb { /* Для Firefox */
+    width: 18px;
+    height: 18px;
+    background: var(--secondary-color);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid #fff;
     transition: var(--transition);
 }
 
+
 input[type="number"] {
-    width: 70px;
-    padding: 5px;
+    width: 60px; /* Уменьшил */
+    padding: 8px 5px; /* Изменил padding */
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
@@ -153,68 +186,106 @@ input[type="number"] {
 select {
     width: 100%;
     padding: 8px;
-    border-radius: 8px;
+    border-radius: 5px; /* Уменьшил */
     background: rgba(255, 255, 255, 0.1);
     color: white;
     border: 1px solid rgba(255, 255, 255, 0.2);
     cursor: pointer;
+    font-size: 0.9em;
 }
 
-/* Добавляем стили для options */
 select option {
-    background-color: #2c3e50; /* Тёмный фон */
-    color: white;             /* Белый текст */
-    padding: 8px;            /* Отступы */
+    background-color: var(--primary-color); 
+    color: white;
+    padding: 8px;
 }
 
 select:focus {
     outline: none;
     border-color: var(--secondary-color);
+    box-shadow: 0 0 5px rgba(var(--secondary-color), 0.5); /* Тень при фокусе */
 }
 
-.add-channel-btn {
+.add-channel-btn, .action-btn { /* Объединил общие стили */
     background: var(--secondary-color);
     color: #fff;
-    padding: 10px 20px;
+    padding: 8px 15px; /* Уменьшил */
     border-radius: 5px;
     cursor: pointer;
     transition: var(--transition);
     border: none;
+    font-size: 0.9em; /* Уменьшил */
+    text-align: center;
+    display: block; /* Чтобы занимали всю ширину, если нужно (для add-channel-btn) */
+    width: 100%;
+    box-sizing: border-box;
 }
 
-.add-channel-btn:hover {
+.add-channel-btn:hover, .action-btn:hover {
     background: #2980b9;
-    transform: translateY(-2px);
+    transform: translateY(-1px); /* Уменьшил сдвиг */
 }
 
-/* Анимации */
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+/* --- НОВЫЕ СТИЛИ ДЛЯ ЭЛЕМЕНТОВ УПРАВЛЕНИЯ КЛАССИФИКАЦИЕЙ АВАТАРОК --- */
+.setting-item {
+    margin-bottom: 10px;
+    display: flex; /* Для выравнивания чекбокса и лейбла */
+    align-items: center; /* Вертикальное выравнивание */
+}
+.setting-item:last-child {
+    margin-bottom: 0;
 }
 
-.fade-in {
-    animation: fadeIn 0.5s ease-out forwards;
+/* Контейнер для выбора режима, если он содержит и label и select */
+#nsfwModeSettingItem {
+    flex-direction: column; /* Label сверху, select снизу */
+    align-items: flex-start; /* Выравнивание по левому краю */
+}
+#nsfwModeSettingItem label { /* Отдельный стиль для label в этом блоке */
+    margin-bottom: 5px;
 }
 
+
+input[type="checkbox"]#classifyAvatarsEnabled {
+    margin-right: 8px;
+    vertical-align: middle; /* Уже есть в .setting-item align-items: center */
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--secondary-color); /* Цвет самого чекбокса */
+    flex-shrink: 0; /* Чтобы чекбокс не сжимался */
+}
+
+label.checkbox-label, /* Убрал for, т.к. он уже есть в HTML */
+label[for="nsfwAvatarDisplayMode"] {
+    /* vertical-align: middle; Уже есть в .setting-item align-items: center */
+    cursor: pointer;
+    font-size: 0.9em;
+    line-height: 1.4; /* Для лучшего отображения с чекбоксом */
+}
+
+#nsfwAvatarDisplayMode {
+    width: 100%; /* Занимает всю ширину родительского .setting-item */
+    /* margin-top: 5px; Управляется через #nsfwModeSettingItem label margin-bottom */
+}
+/* --- КОНЕЦ НОВЫХ СТИЛЕЙ --- */
+
+
+/* Стили для импорта/экспорта */
 .import-export-container {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
+/* .action-btn уже стилизован выше */
 
-.action-btn {
-    background: var(--secondary-color);
-    color: #fff;
-    padding: 10px 15px;
-    border-radius: 5px;
-    cursor: pointer;
-    transition: var(--transition);
-    border: none;
-    font-size: 14px;
+
+/* Анимации (оставляем как есть) */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); } /* Уменьшил translateY */
+    to { opacity: 1; transform: translateY(0); }
 }
 
-.action-btn:hover {
-    background: #2980b9;
-    transform: translateY(-2px);
+.fade-in {
+    animation: fadeIn 0.4s ease-out forwards; /* Уменьшил время */
 }

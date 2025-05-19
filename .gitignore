@@ -7,7 +7,6 @@ __pycache__/
 my_session.session
 bot.session
 forward_bot.session
-poetry.lock
 anon.session
 *.swp
 data/

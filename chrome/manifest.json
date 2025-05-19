@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Telegram Ad Blocker",
-  "version": "1.0",
-  "description": "Filters ads in Telegram Web.",
+  "name": "Telegram Content Filter & NSFW Avatar Classifier",
+  "version": "1.2.0",
+  "description": "Filters ads and classifies user avatars (NSFW/SFW) in Telegram Web.",
   "options_page": "popup.html",
   "permissions": [
-    "activeTab",
-    "scripting",
-    "storage"
+    "storage",
+    "activeTab"
   ],
   "host_permissions": [
-    "https://web.telegram.org/*"
+    "https://web.telegram.org/*",
+    "http://localhost:8000/"   
   ],
   "background": {
     "service_worker": "background.js"
@@ -18,19 +18,18 @@
   "content_scripts": [
     {
       "matches": [
-        "https://web.telegram.org/*"
+        "https://web.telegram.org/a/*",
+        "https://web.telegram.org/k/*",
+        "https://web.telegram.org/z/*"
       ],
-      "js": ["content.js"]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["popup.js"],
-      "matches": ["https://web.telegram.org/*"]
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "TG Filter Settings"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';"

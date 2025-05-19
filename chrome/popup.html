@@ -29,6 +29,25 @@
                 </div>
             </div>
 
+            <!-- НОВАЯ СЕКЦИЯ ДЛЯ НАСТРОЕК КЛАССИФИКАЦИИ АВАТАРОК -->
+            <div class="settings-section fade-in" id="avatarSettingsSectionContainer">
+                <h2>Классификация аватарок</h2>
+                <div class="setting-item">
+                    <input type="checkbox" id="classifyAvatarsEnabled" name="classifyAvatarsEnabled">
+                    <label for="classifyAvatarsEnabled" class="checkbox-label">Включить классификацию аватарок (NSFW)</label>
+                </div>
+                <div class="setting-item" id="nsfwModeSettingItem" style="margin-top: 15px;">
+                    <label for="nsfwAvatarDisplayMode">Режим отображения NSFW аватарок:</label>
+                    <select id="nsfwAvatarDisplayMode" style="margin-top: 5px;">
+                        <option value="blur">Размытие</option>
+                        <option value="hide">Скрыть</option>
+                        <option value="border">Красная рамка</option>
+                        <option value="nothing">Ничего не делать (только метка)</option>
+                    </select>
+                </div>
+            </div>
+            <!-- КОНЕЦ НОВОЙ СЕКЦИИ -->
+
             <div class="settings-section fade-in">
                 <h2>Управление данными</h2>
                 <div class="import-export-container">
