@@ -1,0 +1,71 @@
+@startuml
+title Диаграмма последовательности: Классификация аватарки пользователя
+
+actor Пользователь as User
+participant "Telegram Web (Браузер)" as TelegramWeb
+participant "Content Script (content.js)" as ContentScript
+participant "Background Script (background.js)" as BackgroundScript
+participant "API Сервер (FastAPI - main.py)" as APIServer
+participant "Image Classifier (Модуль в API)" as ImageClassifierLogic
+database "Модель изображений (.pth)" as ImageModelDB
+
+autonumber "<b>[A0]"
+
+User -> TelegramWeb: Просматривает список чатов / профиль / сообщение с аватаркой
+activate TelegramWeb
+
+TelegramWeb -> ContentScript: DOM изменяется (появляется/обновляется аватарка <img>)
+activate ContentScript
+ContentScript -> ContentScript: Обнаруживает новый или необработанный элемент аватарки
+ContentScript -> ContentScript: Извлекает 'src' аватарки
+note right of ContentScript
+  Если 'src' в CLASSIFIED_AVATARS_CACHE:
+  - Применить стили из кэша.
+  - **Завершить для этой аватарки.**
+end note
+ContentScript -> ContentScript: Подготовка imageDataPayload: \n - Если src='blob:': fetch blob -> ArrayBuffer \n - Если src='http(s):': использовать URL
+note right of ContentScript
+  imageDataPayload = {
+    type: 'arrayBuffer'/'url',
+    buffer: ..., mimeType: ..., fileName: ... OR
+    url: ..., fileName: ...
+  }
+end note
+
+ContentScript -> BackgroundScript: chrome.runtime.sendMessage(\n{action: "classifyAvatar", \n imageData: imageDataPayload})
+activate BackgroundScript
+
+alt imageData.type == 'url'
+    BackgroundScript -> BackgroundScript: fetchBlob(imageData.url)
+    BackgroundScript --> BackgroundScript: imageBlob
+end
+
+BackgroundScript -> BackgroundScript: Создает FormData, добавляет imageBlob
+BackgroundScript -> APIServer: fetch('/api/classify_image/', \n{method: 'POST', body: FormData})
+activate APIServer
+
+APIServer -> ImageClassifierLogic: classify_image(image_file)
+activate ImageClassifierLogic
+ImageClassifierLogic -> ImageModelDB: Загрузка модели ResNet \n (если еще не загружена)
+activate ImageModelDB
+ImageModelDB --> ImageClassifierLogic: Модель ResNet
+deactivate ImageModelDB
+ImageClassifierLogic -> ImageClassifierLogic: Предобработка изображения
+ImageClassifierLogic -> ImageClassifierLogic: Предсказание моделью (ResNet)
+ImageClassifierLogic --> APIServer: Результат: {is_nsfw: true, \n prediction_prob_nsfw: 0.92}
+deactivate ImageClassifierLogic
+
+APIServer --> BackgroundScript: HTTP Response (JSON: {is_nsfw: true, \n prediction_prob_nsfw: 0.92})
+deactivate APIServer
+
+BackgroundScript -> ContentScript: sendResponse({is_nsfw: true, \n prediction_prob_nsfw: 0.92})
+deactivate BackgroundScript
+
+ContentScript -> ContentScript: Кэширует результат в CLASSIFIED_AVATARS_CACHE[src]
+ContentScript -> ContentScript: Получает настройки пользователя \n (nsfwAvatarDisplayMode) из chrome.storage
+ContentScript -> TelegramWeb: Применяет стиль к аватарке \n (blur, hide, border) и добавляет метку
+ContentScript -> ContentScript: Помечает аватарку как обработанную \n (например, классом 'nsfw-avatar-processed')
+deactivate ContentScript
+deactivate TelegramWeb
+
+@enduml
