@@ -11,10 +11,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Обработка текстовых сообщений
 async function handleTextClassification(request, sendResponse) {
-    // console.log("BG: Запрос на классификацию текста:", request.text ? request.text.substring(0, 50) + "..." : "EMPTY TEXT");
-    
     try {
-        const response = await fetch("http://localhost:8000/api/classify_text/", { // ИЗМЕНЕНО на HTTP
+        const response = await fetch("https://blackfoxus.ru:8000/api/classify_text/ ", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: request.text }),
@@ -32,7 +30,6 @@ async function handleTextClassification(request, sendResponse) {
         }
 
         const result = await response.json();
-        // console.log("BG: Результат классификации текста:", result);
         sendResponse(result);
     } catch (error) {
         console.error("BG: Ошибка при обработке текста:", error);
@@ -46,8 +43,6 @@ async function handleTextClassification(request, sendResponse) {
 
 // Обработка аватарок
 async function handleAvatarClassification(request, sendResponse) {
-    // console.log("BG: Запрос на классификацию аватарки, imageData:", request.imageData);
-    
     let blobPromise;
     let finalFileName = 'avatar.png'; // Имя файла по умолчанию
 
@@ -58,18 +53,16 @@ async function handleAvatarClassification(request, sendResponse) {
     }
 
     if (request.imageData.type === 'arrayBuffer') {
-        // console.log("BG: Классификация аватарки из ArrayBuffer.");
         if (!request.imageData.buffer || !request.imageData.mimeType) {
-             console.error("BG: Ошибка - неполные данные для arrayBuffer:", request.imageData);
-             sendResponse({ is_nsfw: false, prediction_prob_nsfw: 0, error: "Incomplete ArrayBuffer data" });
-             return;
+            console.error("BG: Ошибка - неполные данные для arrayBuffer:", request.imageData);
+            sendResponse({ is_nsfw: false, prediction_prob_nsfw: 0, error: "Incomplete ArrayBuffer data" });
+            return;
         }
         const byteArray = new Uint8Array(request.imageData.buffer);
         const blob = new Blob([byteArray], { type: request.imageData.mimeType });
         finalFileName = request.imageData.fileName || generateFileName(null, request.imageData.mimeType);
         blobPromise = Promise.resolve(blob);
     } else if (request.imageData.type === 'url') {
-        // console.log("BG: Классификация аватарки из URL:", request.imageData.url);
         if (!request.imageData.url) {
             console.error("BG: Ошибка - отсутствует URL для типа 'url':", request.imageData);
             sendResponse({ is_nsfw: false, prediction_prob_nsfw: 0, error: "Missing URL for imageData type 'url'" });
@@ -92,9 +85,9 @@ async function handleAvatarClassification(request, sendResponse) {
         const formData = new FormData();
         formData.append('file', blob, finalFileName);
 
-        const response = await fetch("http://localhost:8000/api/classify_image/", { // ИЗМЕНЕНО на HTTP
+        const response = await fetch("https://blackfoxus.ru:8000/api/classify_image/ ", {
             method: "POST",
-            body: formData, // Content-Type будет установлен автоматически браузером для FormData
+            body: formData,
         });
 
         if (!response.ok) {
@@ -109,7 +102,6 @@ async function handleAvatarClassification(request, sendResponse) {
         }
 
         const result = await response.json();
-        // console.log("BG: Результат классификации аватарки:", result);
         sendResponse(result);
     } catch (error) {
         console.error("BG: Ошибка при обработке аватарки:", error, "Исходные данные:", request.imageData);
@@ -134,15 +126,13 @@ async function fetchBlob(url) {
 }
 
 function generateFileName(url, mimeType = 'image/png') {
-    let extension = 'png'; // По умолчанию
-    // Пытаемся извлечь из MIME типа, если он есть и валиден
+    let extension = 'png';
     if (mimeType && mimeType.startsWith('image/')) {
         const parts = mimeType.split('/');
         if (parts.length > 1 && ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(parts[1].toLowerCase())) {
             extension = parts[1].toLowerCase();
         }
     }
-    // Если URL есть и не blob, пытаемся извлечь из него (может переопределить MIME)
     if (url && !url.startsWith('blob:')) {
         try {
             const urlObj = new URL(url);

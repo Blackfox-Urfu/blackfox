@@ -10,3 +10,10 @@ for file in *.jpg; do
     echo "Processing file: $file"
     curl -s -X POST "http://localhost:8000/api/classify_image/" -F "file=@$file"
 done
+
+curl -X POST https://blackfoxus.ru:8000/api/classify_text/ \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Купите наш новый продукт со скидкой 50%!"}'
+
+curl -X POST https://blackfoxus.ru:8000/api/classify_image/  \
+  -F "file=@photo_2025-03-08_22-42-12.jpg"
