@@ -14,14 +14,14 @@ CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 USER_AGENT = os.getenv('USER_AGENT')
 
 SFW_SUBREDDITS = []
-NSFW_SUBREDDITS = ['SEXY_PICS_NSFW','Selfies_NSFW','HighResNSFW','nsfwpicsmenwomen']
+NSFW_SUBREDDITS = ['CarSexPorn']
 
 SFW_SAVE_PATH = "data/reddit/sfw_images"
 NSFW_SAVE_PATH = "data/reddit/nsfw_images"
 os.makedirs(SFW_SAVE_PATH, exist_ok=True)
 os.makedirs(NSFW_SAVE_PATH, exist_ok=True)
 
-DOWNLOAD_LIMIT_PER_SUBREDDIT = 5000
+DOWNLOAD_LIMIT_PER_SUBREDDIT = 10000 
 DOWNLOAD_TIMEOUT = 25
 
 reddit = praw.Reddit(
