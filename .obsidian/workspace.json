@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "README.md",
+                "file": "Shap анализ.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "README"
+              "title": "Shap анализ"
             }
           }
         ]
@@ -171,10 +171,20 @@
   },
   "active": "67c9db0980f6a163",
   "lastOpenFiles": [
-    "out/schema/schema/schema.png",
-    "model/tor.md",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_photo_7083@11-05-2024_18-04-28.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_2eb5e01a6f5b4id8rmi8kx.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_004551.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_199980.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_22326hi2335frcy21yd1tt.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_OIP-jWrRPqSCcv1o_SqI11LYUAHaFj.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_1310.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_85801.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_002693.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_3yrewr3i97.png",
+    "model/optuna_resnet/shap_analysis_results/shap_explanation_photo_15146@14-05-2023_22-01-03.png",
+    "out/shap_analyze",
     "README.md",
-    "out/schema/schema/schema 1.png",
-    "out/schema/action/action.png"
+    "Shap анализ.md",
+    "model/tor.md"
   ]
 }

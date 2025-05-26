@@ -30,3 +30,4 @@ catboost_info/
 best_hog_model.pkl
 hog_params.pkl
 result_torch_text/
+model/optuna_resnet/shap_analysis_results/
