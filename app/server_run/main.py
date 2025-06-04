@@ -150,7 +150,7 @@ if not text_model_loaded:
     logger.warning("Text classification model FAILED to load.")
 
 image_model_loaded = image_classifier.load(
-    model_path=os.path.join(MODEL_FILES_RESNET_DIR, 'best_resnet34.pth')
+    model_path=os.path.join(MODEL_FILES_RESNET_DIR, 'best_resnet.pth')
 )
 if not image_model_loaded:
     logger.warning("Image classification model (ResNet34) FAILED to load.")

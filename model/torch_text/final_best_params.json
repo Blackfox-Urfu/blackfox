@@ -1,14 +1,16 @@
 {
-    "num_layers": 4,
-    "hidden_size_0": 244,
-    "hidden_size_1": 99,
-    "hidden_size_2": 76,
-    "hidden_size_3": 74,
-    "dropout": 0.5,
-    "learning_rate": 0.00015646668434945757,
-    "batch_size": 128,
-    "activation": "relu",
-    "use_batch_norm": true,
-    "optimizer": "RMSprop",
-    "weight_decay": 0.0006273950450518026
+    "num_layers": 6,
+    "hidden_size_0": 1152,
+    "hidden_size_1": 460,
+    "hidden_size_2": 358,
+    "hidden_size_3": 312,
+    "hidden_size_4": 153,
+    "hidden_size_5": 89,
+    "dropout": 0.55,
+    "learning_rate": 2.311672481872096e-05,
+    "batch_size": 16,
+    "activation": "leaky_relu",
+    "use_batch_norm": false,
+    "optimizer": "SGD",
+    "weight_decay": 0.0004200969290578561
 }

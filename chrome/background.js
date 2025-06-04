@@ -12,7 +12,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Обработка текстовых сообщений
 async function handleTextClassification(request, sendResponse) {
     try {
-        const response = await fetch("https://blackfoxus.ru:8000/api/classify_text/ ", {
+        const response = await fetch("http://localhost:8000/api/classify_text/ ", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: request.text }),
@@ -85,7 +85,7 @@ async function handleAvatarClassification(request, sendResponse) {
         const formData = new FormData();
         formData.append('file', blob, finalFileName);
 
-        const response = await fetch("https://blackfoxus.ru:8000/api/classify_image/ ", {
+        const response = await fetch("http://localhost:8000/api/classify_image/ ", {
             method: "POST",
             body: formData,
         });

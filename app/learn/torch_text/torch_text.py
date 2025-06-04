@@ -253,20 +253,20 @@ def validate_model(model, dataloader, criterion, device):
 
 # Функция для оптимизации гиперпараметров
 def objective(trial):
-    num_layers = trial.suggest_int('num_layers', 2, 4)
+    num_layers = trial.suggest_int('num_layers', 2, 64 , step=2)
     hidden_sizes = []
-    last_hidden_size = trial.suggest_int(f'hidden_size_0', 128, 768)
+    last_hidden_size = trial.suggest_int('hidden_size_0', 64, 2048, step=64)
     hidden_sizes.append(last_hidden_size)
     for i in range(1, num_layers):
          last_hidden_size = trial.suggest_int(f'hidden_size_{i}', 64, last_hidden_size)
          hidden_sizes.append(last_hidden_size)
-    dropout = trial.suggest_float('dropout', 0.15, 0.5, step=0.05)
-    learning_rate = trial.suggest_float('learning_rate', 5e-6, 5e-4, log=True)
-    batch_size = trial.suggest_categorical('batch_size', [64, 128, 256])
+    dropout = trial.suggest_float('dropout', 0.00, 0.95, step=0.025)
+    learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-1, log=True)
+    batch_size = trial.suggest_categorical('batch_size', [16, 32, 64, 128, 256, 512, 1024, 2048])
     activation = trial.suggest_categorical('activation', ['relu', 'leaky_relu', 'elu'])
     use_batch_norm = trial.suggest_categorical('use_batch_norm', [True, False])
-    optimizer_name = trial.suggest_categorical('optimizer', ['AdamW', 'RMSprop'])
-    weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
+    optimizer_name = trial.suggest_categorical('optimizer', ['Adam', 'AdamW', 'SGD', 'RMSprop', 'Adagrad'])
+    weight_decay = trial.suggest_float('weight_decay', 1e-8, 1e-1, log=True)
 
     model = AdvancedTextClassifier(
         input_size=train_vectors.shape[1],

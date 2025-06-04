@@ -36,11 +36,11 @@ import optuna # <--- Добавляем Optuna
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {DEVICE}")
 
-PERFORM_OPTUNA_SEARCH = True  # True - запустить Optuna, False - пропустить и использовать сохраненные/дефолтные
+PERFORM_OPTUNA_SEARCH = False  # True - запустить Optuna, False - пропустить и использовать сохраненные/дефолтные
 
 IMG_SIZE = 224
 BATCH_SIZE = 64 
-EPOCHS = 15 # Эпохи для финального обучения
+EPOCHS = 25 # Эпохи для финального обучения
 PATIENCE = 5
 OPTUNA_N_TRIALS = 9  # Количество попыток для Optuna
 OPTUNA_EPOCHS = 2   # Количество эпох для каждой попытки Optuna (меньше для скорости)
@@ -50,16 +50,16 @@ OPTUNA_DATASET_FRACTION = 1/3 # Какую часть данных (после �
 FINAL_TEST_SET_FRACTION = 0.2 # Какую часть всего датасета отложить для финального теста
 
 # Пути
-MODEL_DIR = 'model/optuna_resnet' 
+MODEL_DIR = 'model/resnet' 
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-ONNX_PATH = os.path.join(MODEL_DIR, 'nsfw_optuna_resnet.onnx')
-QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, 'nsfw_optuna_resnet_quantized.pth')
-BEST_MODEL_PATH = os.path.join(MODEL_DIR, 'best_optuna_resnet.pth')
+ONNX_PATH = os.path.join(MODEL_DIR, 'nsfw_resnet.onnx')
+QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, 'nsfw_resnet_quantized.pth')
+BEST_MODEL_PATH = os.path.join(MODEL_DIR, 'best_resnet.pth')
+BEST_PARAMS_PATH = os.path.join(MODEL_DIR, 'best_params.pkl')
 BEST_OPTUNA_PARAMS_PATH = os.path.join(MODEL_DIR, 'best_optuna_params.pkl')
 
-
-RESULTS_DIR = 'model/optuna_resnet/results' 
+RESULTS_DIR = 'model/resnet/results' 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Пути к данным
@@ -935,6 +935,7 @@ def main():
         print("\n--- Step 1: Optuna Hyperparameter Search SKIPPED ---")
     
     if params_for_final_training is None:
+        optuna_params_path = os.path.join(MODEL_DIR, 'best_optuna_params.pkl')
         if os.path.exists(BEST_OPTUNA_PARAMS_PATH):
             print(f"Attempting to load previously saved Optuna parameters from: {BEST_OPTUNA_PARAMS_PATH}")
             try:
