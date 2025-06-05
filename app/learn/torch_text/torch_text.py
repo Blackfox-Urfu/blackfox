@@ -73,16 +73,15 @@ def clean_text(text):
         return ""
     return text.replace('\n', ' ').replace('\r', ' ').strip()
 
+      
 def extract_text(message):
-    full_text = ""
-    if "text" not in message or not isinstance(message["text"], list):
-        return ""
-    for part in message["text"]:
-        if isinstance(part, dict) and "text" in part:
-            full_text += str(part["text"])
-        elif isinstance(part, str):
-            full_text += part
-    return full_text
+    text_content = message.get("text", "")
+    if isinstance(text_content, str):
+        return text_content
+    print(f"Warning: Unexpected type for 'text' field in message id {message.get('id')}: {type(text_content)}. Expected str.")
+    return "" 
+
+    
 
 def extract_message_data(message):
     extracted_text = extract_text(message)
@@ -253,15 +252,15 @@ def validate_model(model, dataloader, criterion, device):
 
 # Функция для оптимизации гиперпараметров
 def objective(trial):
-    num_layers = trial.suggest_int('num_layers', 2, 64 , step=2)
+    num_layers = trial.suggest_int('num_layers', 1, 12 , step=1)
     hidden_sizes = []
     last_hidden_size = trial.suggest_int('hidden_size_0', 64, 2048, step=64)
     hidden_sizes.append(last_hidden_size)
     for i in range(1, num_layers):
          last_hidden_size = trial.suggest_int(f'hidden_size_{i}', 64, last_hidden_size)
          hidden_sizes.append(last_hidden_size)
-    dropout = trial.suggest_float('dropout', 0.00, 0.95, step=0.025)
-    learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-1, log=True)
+    dropout = trial.suggest_float('dropout', 0.5, 0.7, step=0.025)
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
     batch_size = trial.suggest_categorical('batch_size', [16, 32, 64, 128, 256, 512, 1024, 2048])
     activation = trial.suggest_categorical('activation', ['relu', 'leaky_relu', 'elu'])
     use_batch_norm = trial.suggest_categorical('use_batch_norm', [True, False])
@@ -292,7 +291,7 @@ def objective(trial):
     )
 
     best_val_f1 = 0.0
-    patience = 8
+    patience = 5
     patience_counter = 0
     temp_model_dir = os.path.join(RESULTS_DIR, "temp_models") # Сохранит в model/torch_text/temp_models/
     os.makedirs(temp_model_dir, exist_ok=True)
@@ -342,8 +341,8 @@ if __name__ == "__main__":
 
     # --- НАЧАЛО ИЗМЕНЕНИЙ ДЛЯ НОВОЙ СТРУКТУРЫ ---
     # Пути к данным теперь строятся от PROJECT_ROOT
-    ad_filepath = os.path.join(PROJECT_ROOT, 'data', 'raw', 'reklama', 'result.json')
-    non_ad_filepath = os.path.join(PROJECT_ROOT, 'data', 'raw','nereklama', 'result.json')
+    ad_filepath = os.path.join(PROJECT_ROOT, 'data', 'processed', 'ads_unified.json')
+    non_ad_filepath = os.path.join(PROJECT_ROOT, 'data', 'processed', 'non_ads_unified.json')
     # --- КОНЕЦ ИЗМЕНЕНИЙ ДЛЯ НОВОЙ СТРУКТУРЫ ---
 
     texts, labels = process_data(ad_filepath, non_ad_filepath)
@@ -415,7 +414,7 @@ if __name__ == "__main__":
     print("\nStarting hyperparameter optimization...")
     opt_start_time = time.time()
     try:
-         study.optimize(objective, n_trials=200, timeout=18000, n_jobs=1) 
+         study.optimize(objective, n_trials=5, timeout=18000, n_jobs=1) 
     except Exception as e:
          print(f"\nOptimization stopped due to an error: {e}")
          import traceback
@@ -484,7 +483,7 @@ if __name__ == "__main__":
         test_dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=use_gpu
     )
 
-    num_epochs_final = 60
+    num_epochs_final = 25
     scheduler_final = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs_final)
     best_test_f1 = -1.0
     optimal_threshold = 0.5 # Инициализация перед использованием
