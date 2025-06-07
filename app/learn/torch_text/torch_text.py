@@ -51,9 +51,14 @@ except NotImplementedError:
 print(f"Using num_workers = {num_workers} for DataLoaders.")
 
 # Проверка доступности GPU
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-use_gpu = torch.cuda.is_available()
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# use_gpu = torch.cuda.is_available()
+# print(f"Using device: {device}")
+
+device = torch.device('cpu')
+use_gpu = False
 print(f"Using device: {device}")
+
 
 # --- Функции load_data, clean_text, extract_text, extract_message_data, save_to_csv (save_to_csv использует обновленный RESULTS_DIR) ---
 def load_data(filepath):
@@ -414,7 +419,7 @@ if __name__ == "__main__":
     print("\nStarting hyperparameter optimization...")
     opt_start_time = time.time()
     try:
-         study.optimize(objective, n_trials=5, timeout=18000, n_jobs=1) 
+         study.optimize(objective, n_trials=100, timeout=18000, n_jobs=1) 
     except Exception as e:
          print(f"\nOptimization stopped due to an error: {e}")
          import traceback

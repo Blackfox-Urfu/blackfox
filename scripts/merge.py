@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 
-# ИСХОДНЫЕ ПУТИ (не изменяются)
-RAW_AD_TELEGRAM_INPUT_FILE = os.path.join(PROJECT_ROOT, "data", "raw", "reklama", "result.json")
+# ИСХОДНЫЕ ПУТИ
+RAW_AD_TELEGRAM_DIR = os.path.join(PROJECT_ROOT, "data", "raw", "reklama") # Изменено: теперь это директория
 RAW_NON_AD_TELEGRAM_INPUT_FILE = os.path.join(PROJECT_ROOT, "data", "raw", "nereklama", "result.json")
 RAW_PIKABU_INPUT_DIR = os.path.join(PROJECT_ROOT, "data", "reddit", "text_posts")
 
@@ -255,24 +255,36 @@ if __name__ == "__main__":
         print(f"Создана директория для обработанных данных: {PROCESSED_DATA_DIR}")
 
     # 1. Обработка рекламных сообщений
-    print("\n--- Обработка рекламных сообщений (из data/raw/reklama) ---")
-    ad_messages = process_telegram_file(RAW_AD_TELEGRAM_INPUT_FILE)
-    if ad_messages:
-        save_unified_data(ad_messages, PROCESSED_ADS_OUTPUT_FILE, "Processed Ads Data")
+    print(f"\n--- Обработка рекламных сообщений (из {RAW_AD_TELEGRAM_DIR}) ---")
+    all_ad_messages = []
+    # Ищем все JSON файлы в указанной директории
+    ad_json_files = glob.glob(os.path.join(RAW_AD_TELEGRAM_DIR, "*.json"))
+
+    if not ad_json_files:
+        print(f"Рекламные JSON файлы не найдены в директории: {RAW_AD_TELEGRAM_DIR}")
     else:
-        print("Рекламные сообщения не найдены в исходном файле или не обработаны.")
+        print(f"Найдено {len(ad_json_files)} рекламных JSON файлов для обработки в {RAW_AD_TELEGRAM_DIR}:")
+        for ad_file_path in ad_json_files:
+            print(f"  Обработка файла: {ad_file_path}")
+            messages_from_file = process_telegram_file(ad_file_path)
+            all_ad_messages.extend(messages_from_file)
+    
+    if all_ad_messages:
+        save_unified_data(all_ad_messages, PROCESSED_ADS_OUTPUT_FILE, "Processed Ads Data")
+    else:
+        print("Рекламные сообщения не найдены в исходных файлах или не обработаны.")
 
     # 2. Обработка нерекламных сообщений
     print("\n--- Обработка нерекламных сообщений ---")
     all_non_ad_messages = []
 
     # 2а. Нерекламные из Telegram (из data/raw/nereklama)
-    print("Обработка нерекламных Telegram сообщений...")
+    print(f"Обработка нерекламных Telegram сообщений из {RAW_NON_AD_TELEGRAM_INPUT_FILE}...")
     non_ad_telegram_messages = process_telegram_file(RAW_NON_AD_TELEGRAM_INPUT_FILE)
     all_non_ad_messages.extend(non_ad_telegram_messages)
 
     # 2б. Нерекламные из Pikabu (из data/reddit/text_posts)
-    print("\nОбработка нерекламных Pikabu сообщений...")
+    print(f"\nОбработка нерекламных Pikabu сообщений из {RAW_PIKABU_INPUT_DIR}...")
     pikabu_files = glob.glob(os.path.join(RAW_PIKABU_INPUT_DIR, "*.json"))
     if not pikabu_files:
         print(f"Исходные файлы Pikabu не найдены в {RAW_PIKABU_INPUT_DIR}")
@@ -280,7 +292,7 @@ if __name__ == "__main__":
         print(f"Найдено {len(pikabu_files)} Pikabu файлов для обработки.")
     
     for pikabu_file in pikabu_files:
-        print(f"Обработка файла: {pikabu_file}")
+        print(f"  Обработка файла: {pikabu_file}")
         non_ad_pikabu_messages = process_pikabu_file(pikabu_file)
         all_non_ad_messages.extend(non_ad_pikabu_messages)
     

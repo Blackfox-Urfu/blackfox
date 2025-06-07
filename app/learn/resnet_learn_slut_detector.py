@@ -36,13 +36,13 @@ import optuna # <--- Добавляем Optuna
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {DEVICE}")
 
-PERFORM_OPTUNA_SEARCH = False  # True - запустить Optuna, False - пропустить и использовать сохраненные/дефолтные
+PERFORM_OPTUNA_SEARCH = True # True - запустить Optuna, False - пропустить и использовать сохраненные/дефолтные
 
 IMG_SIZE = 224
 BATCH_SIZE = 64
 EPOCHS = 5 # Эпохи для финального обучения
 PATIENCE = 5
-OPTUNA_N_TRIALS = 5  # Количество попыток для Optuna
+OPTUNA_N_TRIALS = 10  # Количество попыток для Optuna
 OPTUNA_EPOCHS = 1   # Количество эпох для каждой попытки Optuna (меньше для скорости)
 OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS -1), 3) # Терпение для early stopping в Optuna trial
 

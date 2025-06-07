@@ -1,7 +1,7 @@
-const PROCESSED_MESSAGES = new Set();
-// ЗАМЕНА: Вместо Set будет Map для хранения результатов классификации аватарок
-const CLASSIFIED_AVATARS_CACHE = new Map();
-const MAX_PROCESSED_ITEMS = 500; // Общее ограничение на хранение ID/src
+// --- Кэши и Ограничения ---
+const PROCESSED_MESSAGES_CACHE = new Map(); // Хранит { id: messageId, result: { prediction_prob_ad: number } }
+const CLASSIFIED_AVATARS_CACHE = new Map(); // Хранит { src: avatarSrc, result: { is_nsfw: boolean, prediction_prob_nsfw?: number } }
+const MAX_PROCESSED_ITEMS = 500; // Общее ограничение на хранение в каждом кэше
 
 // --- Настройки (с значениями по умолчанию) ---
 let settings = {
@@ -9,7 +9,7 @@ let settings = {
     adDisplayMode: 'highlight',
     adThreshold: 0.5,
     classifyAvatarsEnabled: true,
-    nsfwAvatarDisplayMode: 'border'
+    nsfwAvatarDisplayMode: 'blur'
 };
 
 // --- Загрузка и обновление настроек ---
@@ -21,6 +21,12 @@ function loadAndUpdateSettings() {
         'classifyAvatarsEnabled',
         'nsfwAvatarDisplayMode'
     ], (data) => {
+        const oldAdDisplayMode = settings.adDisplayMode;
+        const oldAdThreshold = settings.adThreshold;
+        const oldExcludedChannelsString = settings.excludedChannels.join(',');
+        const oldClassifyAvatarsEnabled = settings.classifyAvatarsEnabled;
+        const oldNsfwAvatarDisplayMode = settings.nsfwAvatarDisplayMode;
+
         settings.excludedChannels = (data.excludedChannels || []).map(name => typeof name === 'string' ? name.toLowerCase() : '').filter(Boolean);
         settings.adDisplayMode = data.displayMode || 'highlight';
         settings.adThreshold = data.threshold === undefined ? 0.5 : parseFloat(data.threshold);
@@ -29,35 +35,53 @@ function loadAndUpdateSettings() {
 
         updateExcludeButtonVisibilityAndState();
 
-        if (!settings.classifyAvatarsEnabled) {
-            document.querySelectorAll('img.avatar-photo.nsfw-avatar-processed').forEach(img => {
-                resetNsfwAvatarStyle(img);
-                img.classList.remove('nsfw-avatar-processed', 'nsfw-marked', 'sfw-marked');
+        if (oldAdDisplayMode !== settings.adDisplayMode ||
+            oldAdThreshold !== settings.adThreshold ||
+            oldExcludedChannelsString !== settings.excludedChannels.join(',')) {
+            
+            document.querySelectorAll('div.bubble.ad-classified').forEach(bubble => {
+                bubble.classList.remove('ad-classified', 'ad-excluded');
+                bubble.style.backgroundColor = '';
+                bubble.style.borderLeft = '';
+                bubble.style.opacity = '';
+                bubble.style.display = '';
+                const predictionLabel = bubble.querySelector(".prediction-label");
+                if (predictionLabel) predictionLabel.remove();
+                const avatarLabel = bubble.querySelector(".avatar-prediction-label");
+                if (avatarLabel) avatarLabel.remove();
             });
-            // Очищаем кэш, чтобы при включении заново обработать и классифицировать
-            CLASSIFIED_AVATARS_CACHE.clear();
-            document.querySelectorAll('.avatar-prediction-label').forEach(label => label.remove());
-        } else {
-            // Переприменить стили и метки, если режим отображения NSFW изменился или классификация была только что включена
-            // Это потребует перебора всех видимых аватарок и применения к ним данных из кеша.
-            // Либо, более простой подход: при изменении настроек сбросить status 'nsfw-avatar-processed' у всех
-            // и позволить processNewContent() их заново "обработать" (взяв данные из кеша или классифицировав).
-            document.querySelectorAll('img.avatar-photo.nsfw-avatar-processed').forEach(img => {
-                 img.classList.remove('nsfw-avatar-processed'); // Позволит их снова найти в getAvatars
-            });
-            // Таким образом, следующий вызов processNewContent подхватит их.
         }
+
+        if (oldClassifyAvatarsEnabled !== settings.classifyAvatarsEnabled) {
+            if (!settings.classifyAvatarsEnabled) {
+                document.querySelectorAll('img.avatar-photo.nsfw-avatar-processed').forEach(img => {
+                    resetNsfwAvatarStyle(img);
+                    img.classList.remove('nsfw-avatar-processed', 'nsfw-marked', 'sfw-marked', 'classification-error', 'processing-error');
+                });
+                document.querySelectorAll('.avatar-prediction-label').forEach(label => label.remove());
+            } else {
+                document.querySelectorAll('img.avatar-photo.nsfw-avatar-processed').forEach(img => {
+                     img.classList.remove('nsfw-avatar-processed');
+                });
+            }
+        } else if (settings.classifyAvatarsEnabled && oldNsfwAvatarDisplayMode !== settings.nsfwAvatarDisplayMode) {
+            document.querySelectorAll('img.avatar-photo.nsfw-avatar-processed').forEach(img => {
+                img.classList.remove('nsfw-avatar-processed');
+                resetNsfwAvatarStyle(img);
+            });
+             document.querySelectorAll('.avatar-prediction-label').forEach(label => label.remove());
+        }
+        
+        scheduleProcessNewContent();
     });
 }
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
         let relevantChange = false;
+        const relevantKeys = ['excludedChannels', 'displayMode', 'threshold', 'classifyAvatarsEnabled', 'nsfwAvatarDisplayMode'];
         for (let key in changes) {
-            if (settings.hasOwnProperty(key) ||
-                (key === 'displayMode' && 'adDisplayMode' in settings) ||
-                (key === 'threshold' && 'adThreshold' in settings)
-            ) {
+            if (relevantKeys.includes(key)) {
                 relevantChange = true;
                 break;
             }
@@ -70,7 +94,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 loadAndUpdateSettings();
 
-// --- DOM Взаимодействие (без изменений) ---
+// --- DOM Взаимодействие ---
 function getChatHeaderElement() {
     return document.querySelector(".chat-info .person .content .user-title") ||
            document.querySelector(".chat-info-container .chat-info .title") ||
@@ -98,6 +122,13 @@ function updateExcludeButtonVisibilityAndState() {
     if (!button) {
         button = document.createElement("button");
         button.id = "excludeChannelBtn";
+        button.style.marginLeft = "10px";
+        button.style.padding = "4px 8px";
+        button.style.fontSize = "12px";
+        button.style.border = "none";
+        button.style.borderRadius = "4px";
+        button.style.color = "white";
+        button.style.cursor = "pointer";
         chatTitleContainer.appendChild(button);
         button.onclick = function () {
             const currentChat = getCurrentChatName();
@@ -113,21 +144,24 @@ function updateExcludeButtonVisibilityAndState() {
         if (settings.excludedChannels.includes(currentChat)) {
             button.textContent = "Фильтровать рекламу"; button.style.backgroundColor = "#4CAF50";
         } else {
-            button.textContent = "Не фильтровать рекламу"; button.style.backgroundColor = "#ff5c5c";
+            button.textContent = "Не фильтровать рекламу"; button.style.backgroundColor = "#f44336";
         }
     } else {
         button.style.display = "none";
     }
 }
+
 function getMessages() {
     const currentChat = getCurrentChatName();
-    return Array.from(document.querySelectorAll("div.bubble:not(.own) div.message > span.translatable-message"))
+    return Array.from(document.querySelectorAll("div.bubble:not(.own):not(.ad-classified) div.message > span.translatable-message"))
         .map(msgEl => {
             const bubble = msgEl.closest('div.bubble');
             if (!bubble) return null;
-            const messageId = bubble.dataset.mid || (msgEl.textContent.slice(0,30) + '_' + msgEl.textContent.length);
-            if (PROCESSED_MESSAGES.has(messageId)) return null;
-            return { id: messageId, element: msgEl, text: msgEl.textContent.trim(), channelName: currentChat };
+            // ВНИМАНИЕ: Использование Math.random() для messageId при отсутствии bubble.dataset.mid и bubble.offsetTop
+            // сделает ID нестабильным и помешает кэшированию для таких сообщений.
+            // Старайтесь полагаться на bubble.dataset.mid.
+            const messageId = bubble.dataset.mid || (msgEl.textContent.slice(0,30) + '_' + msgEl.textContent.length + '_' + (bubble.offsetTop || Math.random().toString(36).substring(7)));
+            return { id: messageId, element: msgEl, bubbleElement: bubble, text: msgEl.textContent.trim(), channelName: currentChat };
         }).filter(msg => msg && msg.text);
 }
 
@@ -136,42 +170,63 @@ function getAvatars() {
     const avatarSelectors = ['img.avatar-photo'];
     const foundAvatars = [];
     document.querySelectorAll(avatarSelectors.join(', ')).forEach(img => {
-        // ИЗМЕНЕНИЕ: Проверяем только на 'nsfw-avatar-processed'. Факт наличия в кеше проверим позже.
         if (img.src && img.src !== 'about:blank' && !img.classList.contains('nsfw-avatar-processed')) {
-            if (img.src.startsWith('blob:') || img.src.startsWith('http')) {
-                if (img.offsetParent !== null) {
-                    foundAvatars.push({ element: img, src: img.src });
-                }
+            if (img.offsetParent !== null && (img.src.startsWith('blob:') || img.src.startsWith('http'))) {
+                 foundAvatars.push({ element: img, src: img.src });
             }
         }
     });
     return foundAvatars;
 }
 
-// --- Применение стилей (applyAdStyle, resetNsfwAvatarStyle, applyNsfwAvatarStyle - без изменений) ---
+// --- Применение стилей ---
 function applyAdStyle(messageElement, predictionProbAd) {
-    const bubbleContent = messageElement.closest('div.bubble-content');
-    if (!bubbleContent) return;
-    const bubble = bubbleContent.closest('div.bubble');
+    const bubble = messageElement.closest('div.bubble');
     if (!bubble) return;
-    bubble.style.backgroundColor = ''; bubble.style.borderLeft = ''; bubble.style.opacity = ''; bubble.style.display = '';
-    if (predictionProbAd < settings.adThreshold) return;
+
+    bubble.style.backgroundColor = '';
+    bubble.style.borderLeft = '';
+    bubble.style.opacity = '';
+    bubble.style.display = '';
+
+    if (predictionProbAd < settings.adThreshold) {
+        return; 
+    }
+
     switch (settings.adDisplayMode) {
-        case 'highlight': bubble.style.backgroundColor = 'rgba(255, 204, 203, 0.2)'; bubble.style.borderLeft = '3px solid #ff7979'; break;
-        case 'hide': bubble.style.display = 'none'; break;
-        case 'partial': bubble.style.opacity = '0.4'; break;
+        case 'highlight':
+            bubble.style.backgroundColor = 'rgba(255, 204, 203, 0.2)';
+            bubble.style.borderLeft = '3px solid #ff7979';
+            break;
+        case 'hide':
+            bubble.style.display = 'none';
+            break;
+        case 'partial':
+            bubble.style.opacity = '0.4';
+            break;
     }
 }
+
 function resetNsfwAvatarStyle(imgElement) {
-    imgElement.style.filter = ''; imgElement.style.border = ''; imgElement.style.opacity = '1';
+    imgElement.style.filter = '';
+    imgElement.style.border = '';
+    imgElement.style.opacity = '1';
     imgElement.classList.remove('nsfw-avatar-blur', 'nsfw-avatar-border');
+
     const parentAvatarDiv = imgElement.closest('.avatar');
-    if (parentAvatarDiv) { parentAvatarDiv.style.display = ''; parentAvatarDiv.classList.remove('nsfw-avatar-hide'); }
-    else { imgElement.style.display = ''; imgElement.classList.remove('nsfw-avatar-hide'); }
+    if (parentAvatarDiv) {
+        parentAvatarDiv.style.display = '';
+        parentAvatarDiv.classList.remove('nsfw-avatar-hide');
+    } else {
+        imgElement.style.display = '';
+        imgElement.classList.remove('nsfw-avatar-hide');
+    }
 }
+
 function applyNsfwAvatarStyle(imgElement, isNsfw) {
     resetNsfwAvatarStyle(imgElement);
     imgElement.classList.remove('nsfw-marked', 'sfw-marked');
+
     if (isNsfw) {
         imgElement.classList.add('nsfw-marked');
         switch (settings.nsfwAvatarDisplayMode) {
@@ -186,22 +241,57 @@ function applyNsfwAvatarStyle(imgElement, isNsfw) {
     } else {
         imgElement.classList.add('sfw-marked');
     }
-    imgElement.classList.add('nsfw-avatar-processed'); // Помечаем элемент как обработанный (стили применены)
+    imgElement.classList.add('nsfw-avatar-processed');
 }
 
-// --- Добавление/Обновление текстовой метки для аватара ---
+// --- Добавление/Обновление текстовых меток ---
+function updateAdPredictionLabel(messageSpanElement, predictionProbAd) {
+    const messageContentContainer = messageSpanElement.parentElement;
+    if (!messageContentContainer) return;
+
+    const currentChatName = getCurrentChatName() || '';
+    let predictionElement = messageContentContainer.querySelector(".prediction-label");
+
+    if (settings.excludedChannels.includes(currentChatName)) {
+        if (predictionElement) predictionElement.remove();
+        const avatarLabel = messageContentContainer.querySelector(".avatar-prediction-label");
+        if (avatarLabel) avatarLabel.remove();
+        return;
+    }
+
+    if (!predictionElement) {
+        predictionElement = document.createElement("div");
+        predictionElement.className = "prediction-label";
+        messageContentContainer.insertBefore(predictionElement, messageSpanElement);
+    }
+
+    const probPercent = (predictionProbAd * 100).toFixed(1);
+    predictionElement.textContent = `Реклама: ${probPercent}%`;
+    predictionElement.classList.toggle('is-ad-positive', predictionProbAd >= settings.adThreshold);
+    predictionElement.classList.toggle('is-ad-negative', predictionProbAd < settings.adThreshold);
+
+    const avatarLabel = messageContentContainer.querySelector(".avatar-prediction-label");
+    if (avatarLabel && predictionProbAd < settings.adThreshold) { // Если не реклама, удаляем метку аватара
+        avatarLabel.remove();
+    }
+    // Если реклама, то addOrUpdateAvatarPredictionLabel позаботится о метке аватара
+}
+
 function addOrUpdateAvatarPredictionLabel(imgElement, classificationResult) {
+    if (!settings.classifyAvatarsEnabled) return;
+
     const bubbleElement = imgElement.closest('div.bubble:not(.own)');
-    if (bubbleElement && settings.classifyAvatarsEnabled) {
+    if (bubbleElement) {
         const messageContentContainer = bubbleElement.querySelector('div.message');
         if (messageContentContainer) {
-            const adPredictionLabel = messageContentContainer.querySelector(".prediction-label");
-            if (adPredictionLabel) { // Только если есть метка рекламы
-                let avatarLabel = messageContentContainer.querySelector(".avatar-prediction-label");
+            const adLabelElement = messageContentContainer.querySelector(".prediction-label");
+            let avatarLabel = messageContentContainer.querySelector(".avatar-prediction-label");
+
+            if (adLabelElement && adLabelElement.classList.contains('is-ad-positive')) {
                 if (!avatarLabel) {
                     avatarLabel = document.createElement('div');
                     avatarLabel.className = 'avatar-prediction-label';
-                    adPredictionLabel.insertAdjacentElement('afterend', avatarLabel);
+                    adLabelElement.insertAdjacentElement('afterend', avatarLabel);
                 }
                 let nsfwScoreDisplay = "";
                 if (classificationResult.prediction_prob_nsfw !== undefined && typeof classificationResult.prediction_prob_nsfw === 'number') {
@@ -211,60 +301,89 @@ function addOrUpdateAvatarPredictionLabel(imgElement, classificationResult) {
                 avatarLabel.textContent = labelText;
                 avatarLabel.classList.toggle('is-nsfw-positive', classificationResult.is_nsfw);
                 avatarLabel.classList.toggle('is-nsfw-negative', !classificationResult.is_nsfw);
+            } else {
+                if (avatarLabel) avatarLabel.remove();
             }
         }
     }
 }
 
-
-// --- Логика классификации (classifyMessages - без изменений) ---
+// --- Логика классификации ---
 async function classifyMessages(messagesToClassify) {
     for (const msg of messagesToClassify) {
+        if (!msg.bubbleElement || !msg.element) continue;
+
         if (settings.excludedChannels.includes(msg.channelName)) {
-            PROCESSED_MESSAGES.add(msg.id); continue;
+            applyAdStyle(msg.element, 0); // 0 -> сброс стилей
+            updateAdPredictionLabel(msg.element, 0); // 0 -> удаление метки рекламы (и аватара)
+            msg.bubbleElement.classList.add('ad-classified', 'ad-excluded');
+            PROCESSED_MESSAGES_CACHE.delete(msg.id);
+            continue;
         }
+        
+        if (PROCESSED_MESSAGES_CACHE.has(msg.id)) {
+            const cachedData = PROCESSED_MESSAGES_CACHE.get(msg.id);
+            if (cachedData && typeof cachedData.prediction_prob_ad !== 'undefined') {
+                applyAdStyle(msg.element, cachedData.prediction_prob_ad);
+                updateAdPredictionLabel(msg.element, cachedData.prediction_prob_ad);
+                msg.bubbleElement.classList.add('ad-classified');
+                continue;
+            } else {
+                PROCESSED_MESSAGES_CACHE.delete(msg.id);
+            }
+        }
+
         try {
             const response = await chrome.runtime.sendMessage({ action: "classify", text: msg.text });
-            if (!response || typeof response !== "object") { PROCESSED_MESSAGES.add(msg.id); continue; }
-            if (response.error) { PROCESSED_MESSAGES.add(msg.id); continue; }
-            applyAdStyle(msg.element, response.prediction_prob_ad);
-            let predictionElement = msg.element.parentElement.querySelector(".prediction-label");
-            if (!predictionElement) {
-                predictionElement = document.createElement("div");
-                predictionElement.className = "prediction-label";
-                if(msg.element.parentElement) msg.element.parentElement.insertBefore(predictionElement, msg.element);
+
+            if (!response || typeof response !== "object") {
+                console.error("CONTENT: Invalid response (message):", response, "Text:", msg.text.slice(0, 100));
+                msg.bubbleElement.classList.add('ad-classified', 'classification-error');
+                continue;
             }
-            const probPercent = (response.prediction_prob_ad * 100).toFixed(1);
-            predictionElement.textContent = `Реклама: ${probPercent}%`;
-            predictionElement.classList.toggle('is-ad-positive', response.prediction_prob_ad >= settings.adThreshold);
-            predictionElement.classList.toggle('is-ad-negative', response.prediction_prob_ad < settings.adThreshold);
-            PROCESSED_MESSAGES.add(msg.id);
-        } catch (error) { PROCESSED_MESSAGES.add(msg.id); }
+            if (response.error) {
+                console.error("CONTENT: API error (message):", response.error, "Text:", msg.text.slice(0, 100));
+                msg.bubbleElement.classList.add('ad-classified', 'classification-error');
+                continue;
+            }
+            
+            const classificationResult = { prediction_prob_ad: response.prediction_prob_ad };
+            PROCESSED_MESSAGES_CACHE.set(msg.id, classificationResult);
+            applyAdStyle(msg.element, classificationResult.prediction_prob_ad);
+            updateAdPredictionLabel(msg.element, classificationResult.prediction_prob_ad);
+            msg.bubbleElement.classList.add('ad-classified');
+
+        } catch (error) {
+            console.error("CONTENT: Error during message classification call:", error, "Text:", msg.text.slice(0, 100));
+            msg.bubbleElement.classList.add('ad-classified', 'processing-error');
+        }
     }
 }
 
-// --- ИЗМЕНЕННАЯ ЛОГИКА classifyAvatars ---
 async function classifyAvatars(avatarsToClassify) {
     if (!settings.classifyAvatarsEnabled) return;
 
     for (const avatar of avatarsToClassify) {
-        // avatar.element УЖЕ не имеет 'nsfw-avatar-processed' благодаря getAvatars()
-        // Теперь проверяем кэш
+        if (!avatar.element) continue;
+
         if (CLASSIFIED_AVATARS_CACHE.has(avatar.src)) {
             const cachedResult = CLASSIFIED_AVATARS_CACHE.get(avatar.src);
-            applyNsfwAvatarStyle(avatar.element, cachedResult.is_nsfw);
-            addOrUpdateAvatarPredictionLabel(avatar.element, cachedResult);
-            // avatar.element.classList.add('nsfw-avatar-processed'); // applyNsfwAvatarStyle уже делает это
-            continue; // Переходим к следующему аватару
+             if (cachedResult && typeof cachedResult.is_nsfw !== 'undefined') {
+                applyNsfwAvatarStyle(avatar.element, cachedResult.is_nsfw);
+                addOrUpdateAvatarPredictionLabel(avatar.element, cachedResult);
+            } else {
+                 CLASSIFIED_AVATARS_CACHE.delete(avatar.src);
+            }
+            continue;
         }
 
-        // Если в кэше нет, классифицируем
         try {
             let imageDataPayload;
             let fileName = 'avatar.png';
+
             if (avatar.src.startsWith('blob:')) {
                 const fetchResponse = await fetch(avatar.src);
-                if (!fetchResponse.ok) throw new Error(`Fetch blob failed: ${fetchResponse.status}`);
+                if (!fetchResponse.ok) throw new Error(`Fetch blob failed: ${fetchResponse.status} for ${avatar.src}`);
                 const blobData = await fetchResponse.blob();
                 const arrayBuffer = await blobData.arrayBuffer();
                 if (blobData.type && blobData.type.startsWith('image/')) {
@@ -284,34 +403,28 @@ async function classifyAvatars(avatarsToClassify) {
             const response = await chrome.runtime.sendMessage({ action: "classifyAvatar", imageData: imageDataPayload });
 
             if (!response || typeof response !== "object") {
-                // Помечаем элемент, чтобы не пытаться снова с этим элементом, но не кэшируем как "неудачный" URL
-                avatar.element.classList.add('nsfw-avatar-processed', 'classification-error');
                 console.error("CONTENT: Invalid response (avatar):", response, "URL:", avatar.src);
+                avatar.element.classList.add('nsfw-avatar-processed', 'classification-error');
                 continue;
             }
             if (response.error) {
-                avatar.element.classList.add('nsfw-avatar-processed', 'classification-error');
                 console.error("CONTENT: API error (avatar):", response.error, "URL:", avatar.src);
-                // Здесь можно кэшировать ошибку для URL, чтобы не долбить API по этому URL
-                // CLASSIFIED_AVATARS_CACHE.set(avatar.src, { error: response.error, is_nsfw: false });
+                avatar.element.classList.add('nsfw-avatar-processed', 'classification-error');
+                // CLASSIFIED_AVATARS_CACHE.set(avatar.src, { is_nsfw: false, error: response.error }); // Опционально: кэшировать ошибку
                 continue;
             }
             
-            // Успешная классификация
             const classificationResult = {
                 is_nsfw: response.is_nsfw,
                 prediction_prob_nsfw: response.prediction_prob_nsfw
-                // можно добавить и другие поля из response, если они нужны
             };
 
-            CLASSIFIED_AVATARS_CACHE.set(avatar.src, classificationResult); // Кэшируем результат
+            CLASSIFIED_AVATARS_CACHE.set(avatar.src, classificationResult);
             applyNsfwAvatarStyle(avatar.element, classificationResult.is_nsfw);
             addOrUpdateAvatarPredictionLabel(avatar.element, classificationResult);
-            // avatar.element.classList.add('nsfw-avatar-processed'); // applyNsfwAvatarStyle уже делает это
 
         } catch (error) {
             console.error("CONTENT: Error processing/classifying avatar:", error, "URL:", avatar.src);
-            // Помечаем только элемент, чтобы не пытаться снова с этим экземпляром, но URL не кэшируем как ошибочный глобально
             avatar.element.classList.add('nsfw-avatar-processed', 'processing-error');
         }
     }
@@ -319,16 +432,13 @@ async function classifyAvatars(avatarsToClassify) {
 
 // --- Основной цикл и обработка ---
 function cleanProcessedSets() {
-    if (PROCESSED_MESSAGES.size > MAX_PROCESSED_ITEMS) {
-        const messagesToDelete = Array.from(PROCESSED_MESSAGES).slice(0, PROCESSED_MESSAGES.size - MAX_PROCESSED_ITEMS + 100);
-        messagesToDelete.forEach(id => PROCESSED_MESSAGES.delete(id));
+    if (PROCESSED_MESSAGES_CACHE.size > MAX_PROCESSED_ITEMS) {
+        const keysToDelete = Array.from(PROCESSED_MESSAGES_CACHE.keys()).slice(0, PROCESSED_MESSAGES_CACHE.size - MAX_PROCESSED_ITEMS + 100);
+        keysToDelete.forEach(key => PROCESSED_MESSAGES_CACHE.delete(key));
     }
-    // Очистка кэша аватарок, если он слишком разросся
     if (CLASSIFIED_AVATARS_CACHE.size > MAX_PROCESSED_ITEMS) {
-        // Удаляем самые старые записи. Map сохраняет порядок вставки.
         const keysToDelete = Array.from(CLASSIFIED_AVATARS_CACHE.keys()).slice(0, CLASSIFIED_AVATARS_CACHE.size - MAX_PROCESSED_ITEMS + 100);
         keysToDelete.forEach(key => CLASSIFIED_AVATARS_CACHE.delete(key));
-        // console.log(`CONTENT: Avatar cache cleaned. Size: ${CLASSIFIED_AVATARS_CACHE.size}`);
     }
 }
 
@@ -343,6 +453,7 @@ function processNewContent() {
     if (messages.length > 0) {
         classifyMessages(messages);
     }
+
     if (settings.classifyAvatarsEnabled) {
         const avatars = getAvatars();
         if (avatars.length > 0) {
@@ -352,28 +463,25 @@ function processNewContent() {
     cleanProcessedSets();
 }
 
-// --- Наблюдатель за изменениями DOM (без изменений) ---
+// --- Наблюдатель за изменениями DOM ---
 const observer = new MutationObserver((mutationsList) => {
     let newContentPotentiallyAdded = false;
     for (const mutation of mutationsList) {
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
             for (const node of mutation.addedNodes) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    if (node.matches && (node.matches('.bubble, .chat-list-item, .profile-view') || node.querySelector('.bubble, .avatar-photo'))) {
+                    if (node.matches && (node.matches('.bubble, .chat-list-item, .profile-view, .chat-info') || node.querySelector('.bubble, .avatar-photo'))) {
                         newContentPotentiallyAdded = true; break;
                     }
                 }
             }
         }
         if (mutation.type === 'attributes' && mutation.attributeName === 'src' && mutation.target.matches && mutation.target.matches('img.avatar-photo')) {
-            // Если src изменился, и это аватарка, которая уже была "обработана" (например, заблюрена),
-            // нужно снять с нее класс 'nsfw-avatar-processed', чтобы она снова попала в getAvatars для новой обработки/проверки кеша
-            if (mutation.target.classList.contains('nsfw-avatar-processed')) {
-                mutation.target.classList.remove('nsfw-avatar-processed');
-                 // Можно также удалить ее специфичные стили, если они были установлены напрямую, а не классами
-                resetNsfwAvatarStyle(mutation.target);
-                // И удалить текстовую метку, если она была рядом
-                const bubble = mutation.target.closest('div.bubble:not(.own)');
+            const imgTarget = mutation.target;
+            if (imgTarget.classList.contains('nsfw-avatar-processed')) {
+                resetNsfwAvatarStyle(imgTarget);
+                imgTarget.classList.remove('nsfw-avatar-processed', 'nsfw-marked', 'sfw-marked', 'classification-error', 'processing-error');
+                const bubble = imgTarget.closest('div.bubble:not(.own)');
                 if (bubble) {
                     const avatarLabel = bubble.querySelector(".avatar-prediction-label");
                     if (avatarLabel) avatarLabel.remove();
@@ -381,31 +489,68 @@ const observer = new MutationObserver((mutationsList) => {
             }
             newContentPotentiallyAdded = true;
         }
+        if (mutation.type === 'attributes' && mutation.attributeName === 'class' && mutation.target.matches && mutation.target.matches('div.bubble')) {
+            const bubbleTarget = mutation.target;
+            const messageId = bubbleTarget.dataset.mid; // Предполагаем, что ID есть в dataset.mid
+            if (messageId && !bubbleTarget.classList.contains('ad-classified') && PROCESSED_MESSAGES_CACHE.has(messageId)) {
+                // Если элемент потерял наш класс .ad-classified, но есть в кэше, это может быть признаком
+                // того, что Telegram перерисовал его, и нужно восстановить нашу классификацию.
+                // scheduleProcessNewContent() уже вызовется, если newContentPotentiallyAdded = true.
+                // Можно просто убедиться, что getMessages() его подхватит, убрав класс .ad-classified,
+                // что мы уже делаем в loadAndUpdateSettings при смене настроек.
+                // Здесь можно просто установить флаг.
+                newContentPotentiallyAdded = true;
+            }
+        }
         if (newContentPotentiallyAdded) break;
     }
     if (newContentPotentiallyAdded) {
         scheduleProcessNewContent();
     }
 });
-const leftColumn = document.getElementById('LeftColumn');
-const middleColumn = document.getElementById('MiddleColumn');
-const rightColumn = document.getElementById('RightColumn');
-if (leftColumn) observer.observe(leftColumn, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-if (middleColumn) observer.observe(middleColumn, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-if (rightColumn) observer.observe(rightColumn, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
-if (!leftColumn && !middleColumn && !rightColumn) {
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+
+function startObserver() {
+    const observeConfig = { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'class'] };
+    const leftColumn = document.getElementById('LeftColumn');
+    const middleColumn = document.getElementById('MiddleColumn');
+    const rightColumn = document.getElementById('RightColumn');
+    let observedSomething = false;
+    if (leftColumn) { observer.observe(leftColumn, observeConfig); observedSomething = true; }
+    if (middleColumn) { observer.observe(middleColumn, observeConfig); observedSomething = true; }
+    if (rightColumn) { observer.observe(rightColumn, observeConfig); observedSomething = true; }
+    if (!observedSomething) {
+        observer.observe(document.body, observeConfig);
+        console.log("CONTENT: Observer started on document.body.");
+    } else {
+        // console.log("CONTENT: Observer started on main columns.");
+    }
 }
 
-setInterval(processNewContent, 2000);
+// --- Периодические проверки и Инициализация ---
+setInterval(processNewContent, 2000); // Дополнительный вызов на случай, если observer что-то пропустил
 setInterval(updateExcludeButtonVisibilityAndState, 2500);
-console.log("CONTENT: Скрипт content.js загружен и активен (с кэшированием аватарок).");
+
+console.log("CONTENT: Ad and NSFW classifier script loaded (v.full.final).");
 
 function initWhenReady() {
     if (document.readyState === "complete" || document.readyState === "interactive") {
-        updateExcludeButtonVisibilityAndState(); processNewContent();
+        updateExcludeButtonVisibilityAndState();
+        processNewContent();
+        startObserver();
     } else {
-        document.addEventListener("DOMContentLoaded", () => { updateExcludeButtonVisibilityAndState(); processNewContent(); });
+        document.addEventListener("DOMContentLoaded", () => {
+            updateExcludeButtonVisibilityAndState();
+            processNewContent();
+            startObserver();
+        });
     }
 }
+
 initWhenReady();
+
+// Напоминание: CSS стили должны быть определены в файле CSS вашего расширения
+// или внедрены через JavaScript.
+// Примерные CSS классы, которые используются в скрипте:
+// .nsfw-avatar-blur, .nsfw-avatar-border, .nsfw-avatar-hide
+// .prediction-label, .prediction-label.is-ad-positive, .prediction-label.is-ad-negative
+// .avatar-prediction-label, .avatar-prediction-label.is-nsfw-positive, .avatar-prediction-label.is-nsfw-negative
