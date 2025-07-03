@@ -1,17 +1,11 @@
 {
-    "num_layers": 7,
-    "hidden_size_0": 1216,
-    "hidden_size_1": 117,
-    "hidden_size_2": 96,
-    "hidden_size_3": 69,
-    "hidden_size_4": 64,
-    "hidden_size_5": 64,
-    "hidden_size_6": 64,
-    "dropout": 0.7,
-    "learning_rate": 0.0008536189862866829,
-    "batch_size": 16,
+    "num_layers": 1,
+    "hidden_size_0": 1280,
+    "dropout": 0.675,
+    "learning_rate": 1.3477102340819899e-05,
+    "batch_size": 32,
     "activation": "relu",
-    "use_batch_norm": false,
-    "optimizer": "SGD",
-    "weight_decay": 0.018356566544355055
+    "use_batch_norm": true,
+    "optimizer": "AdamW",
+    "weight_decay": 1.0252088585513619e-08
 }

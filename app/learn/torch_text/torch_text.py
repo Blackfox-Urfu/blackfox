@@ -50,14 +50,11 @@ except NotImplementedError:
     num_workers = 4
 print(f"Using num_workers = {num_workers} for DataLoaders.")
 
-# Проверка доступности GPU
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# use_gpu = torch.cuda.is_available()
-# print(f"Using device: {device}")
-
-device = torch.device('cpu')
-use_gpu = False
+#Проверка доступности GPU
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+use_gpu = torch.cuda.is_available()
 print(f"Using device: {device}")
+
 
 
 # --- Функции load_data, clean_text, extract_text, extract_message_data, save_to_csv (save_to_csv использует обновленный RESULTS_DIR) ---

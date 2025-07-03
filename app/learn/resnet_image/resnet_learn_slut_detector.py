@@ -1,79 +1,106 @@
 import os
+import sys
+from collections import Counter
+import time
+import warnings 
+import joblib
+import matplotlib.pyplot as plt
+import numpy as np
+import optuna
+import seaborn as sns
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import models, transforms
-from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-import numpy as np
 from PIL import Image
-Image.MAX_IMAGE_PIXELS = None # Для обработки очень больших изображений, если DecompressionBombWarning возникает
 from sklearn.metrics import (
-    roc_auc_score,
     accuracy_score,
+    average_precision_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
-    classification_report,
-    average_precision_score,
-    confusion_matrix,
+    roc_auc_score,
     roc_curve,
-    precision_recall_curve
 )
-import joblib # Для сохранения/загрузки параметров Optuna и порога
-from tqdm import tqdm
-# import onnx # Импортируется позже, если нужно для ONNX
-# import onnxruntime as ort # Импортируется позже, если нужно для ONNX
-from torch.quantization import quantize_dynamic
-# import time # Не используется напрямую
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
-import seaborn as sns
-from collections import Counter
-# from torch.cuda.amp import GradScaler, autocast # Старый API
-import optuna # <--- Добавляем Optuna
+from torch.cuda.amp import GradScaler
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
+from torchvision import models, transforms
+from tqdm import tqdm
+
+
+try:
+    if '__file__' in locals():
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+        current_path = SCRIPT_DIR
+        while not (os.path.exists(os.path.join(current_path, 'pyproject.toml')) or os.path.exists(os.path.join(current_path, '.git'))):
+            parent_path = os.path.dirname(current_path)
+            if parent_path == current_path:
+                raise FileNotFoundError("Project root not found.")
+            current_path = parent_path
+        PROJECT_ROOT = current_path
+    else:
+        PROJECT_ROOT = os.getcwd()
+
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+
+    from app.learn.resnet_image.model_architecture import create_configurable_model
+    print(f"✅ Successfully imported 'create_configurable_model'. Project root set to: {PROJECT_ROOT}")
+
+except (ImportError, FileNotFoundError) as e:
+    print(f"❌ CRITICAL ERROR: Could not import model architecture.")
+    print(f"   Please ensure 'app/learn/resnet_image/model_architecture.py' exists.")
+    print(f"   Error details: {e}")
+    sys.exit(1)
+# -------------------------------------------------------------------
+
+Image.MAX_IMAGE_PIXELS = None
+# Optional: Suppress the specific PIL warning if it clutters the logs too much
+warnings.filterwarnings("ignore", "(?s).*Palette images with Transparency.*")
+
 
 # --- Конфигурация ---
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {DEVICE}")
 
-PERFORM_OPTUNA_SEARCH = True # True - запустить Optuna, False - пропустить и использовать сохраненные/дефолтные
+PERFORM_OPTUNA_SEARCH = True
+IMG_SIZE = 256
+BATCH_SIZE = 512
+EPOCHS = 6
+PATIENCE = 3
+OPTUNA_N_TRIALS = 10
+OPTUNA_EPOCHS = 3
+OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
+OPTUNA_DATASET_FRACTION = 1 / 10
+FINAL_TEST_SET_FRACTION = 0.2
 
-IMG_SIZE = 224
-BATCH_SIZE = 64
-EPOCHS = 5 # Эпохи для финального обучения
-PATIENCE = 5
-OPTUNA_N_TRIALS = 10  # Количество попыток для Optuna
-OPTUNA_EPOCHS = 1   # Количество эпох для каждой попытки Optuna (меньше для скорости)
-OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS -1), 3) # Терпение для early stopping в Optuna trial
-
-OPTUNA_DATASET_FRACTION = 1/3 # Какую часть данных (после отложенного теста) использовать для Optuna
-FINAL_TEST_SET_FRACTION = 0.2 # Какую часть всего датасета отложить для финального теста
-
-# Пути
 MODEL_DIR = 'model/resnet'
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 ONNX_PATH = os.path.join(MODEL_DIR, 'nsfw_resnet.onnx')
-QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, 'nsfw_resnet_quantized.pth')
-BEST_MODEL_PATH = os.path.join(MODEL_DIR, 'best_resnet.pth')
-BEST_PARAMS_PATH = os.path.join(MODEL_DIR, 'best_params.pkl') # Не используется напрямую, но оставлен для совместимости
 BEST_OPTUNA_PARAMS_PATH = os.path.join(MODEL_DIR, 'best_optuna_params.pkl')
-OPTIMAL_THRESHOLD_PATH = os.path.join(MODEL_DIR, 'optimal_threshold.pkl') # Для сохранения оптимального порога
 
-RESULTS_DIR = 'model/resnet/results'
+BEST_STATE_DICT_PATH = os.path.join(MODEL_DIR, 'best_resnet_state_dict.pth')
+FINAL_CHECKPOINT_PATH = os.path.join(MODEL_DIR, 'best_resnet_checkpoint.pth')
+
+# ADDED: Define missing path variables
+QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, 'quantized_resnet_state_dict.pth')
+OPTIMAL_THRESHOLD_PATH = os.path.join(MODEL_DIR, 'optimal_threshold.pkl')
+
+RESULTS_DIR = os.path.join(MODEL_DIR, 'results')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# Пути для данных SHAP (файлы, которые будут созданы этим скриптом)
 FINAL_TEST_DATA_PATHS_FILE = os.path.join(RESULTS_DIR, "final_test_data_paths.txt")
 FINAL_TEST_DATA_LABELS_FILE = os.path.join(RESULTS_DIR, "final_test_data_labels.txt")
 
-
-# Пути к данным
 SLUT_DATA_DIR = 'data/raw/slut'
 REGULAR_DATA_DIR = 'data/raw/regular'
 
-# Глобальная переменная для оптимального порога (будет обновлена и сохранена)
 OPTIMAL_THRESHOLD = 0.5
+
 
 # --- Аугментация данных ---
 train_transform = transforms.Compose([
@@ -101,15 +128,16 @@ class NSFWDataset(Dataset):
         self.labels = labels
         self.transform = transform
         self.cache = {}
-        if not filepaths: # Если filepaths пуст
+        if not filepaths:
             self.cache_ram = False
             return
 
-        estimated_ram_gb = (len(filepaths) * IMG_SIZE * IMG_SIZE * 3 * 1) / (1024**3)
-        self.cache_ram = cache_ram and (estimated_ram_gb < 20) # Ограничиваем кеш RAM
+        estimated_ram_gb = (len(filepaths) * IMG_SIZE * IMG_SIZE * 3 * 1) / (1024 ** 3)
+        self.cache_ram = cache_ram and (estimated_ram_gb < 50)
         if self.cache_ram and len(filepaths) > 0:
             print(f"RAM caching for PIL Images is enabled. Estimated RAM usage for cache: {estimated_ram_gb:.2f} GB")
-
+        elif not self.cache_ram and cache_ram and len(filepaths) > 0:
+            print(f"RAM caching for PIL Images is DISABLED. Estimated RAM usage ({estimated_ram_gb:.2f} GB) exceeds limit or cache_ram was False.")
 
     def __len__(self):
         return len(self.filepaths)
@@ -118,8 +146,9 @@ class NSFWDataset(Dataset):
         if idx >= len(self.filepaths):
             print(f"Error: NSFWDataset __getitem__ index {idx} out of bounds for length {len(self.filepaths)}")
             if not self.filepaths:
-                placeholder_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color = 'magenta')
-                if self.transform: placeholder_img = self.transform(placeholder_img)
+                placeholder_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='magenta')
+                if self.transform:
+                    placeholder_img = self.transform(placeholder_img)
                 return placeholder_img, torch.tensor(0.0, dtype=torch.float)
             image_path = self.filepaths[0]
             label = self.labels[0]
@@ -134,7 +163,7 @@ class NSFWDataset(Dataset):
                 img = Image.open(image_path).convert('RGB')
                 if self.cache_ram:
                     self.cache[image_path] = img.copy()
-            except Exception as e:
+            except Exception:
                 placeholder_img_obj = None
                 if self.cache:
                     valid_cached_keys = [k for k, v_img in self.cache.items() if v_img is not None]
@@ -143,32 +172,43 @@ class NSFWDataset(Dataset):
 
                 if placeholder_img_obj is None and self.filepaths:
                     try:
-                        placeholder_img_obj = Image.open(self.filepaths[0]).convert('RGB')
-                    except:
-                        pass
+                        first_valid_path_idx = 0
+                        while first_valid_path_idx < len(self.filepaths):
+                            try:
+                                placeholder_img_obj = Image.open(self.filepaths[first_valid_path_idx]).convert('RGB')
+                                break
+                            except Exception:
+                                first_valid_path_idx +=1
+                        if placeholder_img_obj is None and first_valid_path_idx == len(self.filepaths):
+                             placeholder_img_obj = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color = 'red')
+                    except Exception:
+                         placeholder_img_obj = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color = 'red')
 
                 if placeholder_img_obj:
                     img = placeholder_img_obj
                 else:
-                    img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color = 'red')
-
+                    img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='red')
 
         if self.transform:
             img = self.transform(img)
 
         return img, torch.tensor(label, dtype=torch.float)
 
-# --- Вспомогательные функции для метрик и графиков ---
+# --- (The rest of your helper functions remain the same) ---
+# ...
+# [No changes needed for save_metrics_report, plot_confusion_matrix, plot_roc_curve, plot_precision_recall_curve, load_data, create_configurable_model, unfreeze_layers, get_sampler_weights]
+# ...
 def save_metrics_report(y_true, y_pred_binary, y_scores_probs, filename='metrics_report.txt'):
-    if not hasattr(y_true, '__len__') or len(y_true) == 0:
-        print(f"Skipping metrics report '{filename}', no true labels provided.")
+    # Check if y_true is list-like and has elements
+    if not (hasattr(y_true, '__len__') and len(y_true) > 0):
+        print(f"Skipping metrics report '{filename}', no true labels provided or y_true is not list-like.")
         return None, 0.0, 0.0
 
     try:
         report_str = classification_report(y_true, y_pred_binary, target_names=['Regular', 'NSFW'], zero_division=0)
         roc_auc = 0.0
         ap_score = 0.0
-        if len(np.unique(y_true)) > 1:
+        if len(np.unique(y_true)) > 1: # Ensure there are at least two classes for ROC AUC and AP
             roc_auc = roc_auc_score(y_true, y_scores_probs)
             ap_score = average_precision_score(y_true, y_scores_probs)
         else:
@@ -192,7 +232,7 @@ def save_metrics_report(y_true, y_pred_binary, y_scores_probs, filename='metrics
     return report_str, roc_auc, ap_score
 
 def plot_confusion_matrix(y_true, y_pred_binary, filename='confusion_matrix.png'):
-    if not hasattr(y_true, '__len__') or len(y_true) == 0:
+    if not (hasattr(y_true, '__len__') and len(y_true) > 0):
         print(f"Skipping confusion matrix '{filename}', no true labels provided.")
         return
     try:
@@ -211,9 +251,8 @@ def plot_confusion_matrix(y_true, y_pred_binary, filename='confusion_matrix.png'
     except Exception as e:
         print(f"Error plotting confusion matrix '{filename}': {e}")
 
-
 def plot_roc_curve(y_true, y_scores_probs, filename='roc_curve.png'):
-    if not hasattr(y_true, '__len__') or len(y_true) == 0:
+    if not (hasattr(y_true, '__len__') and len(y_true) > 0):
         print(f"Skipping ROC curve '{filename}', no true labels provided.")
         return
     if len(np.unique(y_true)) < 2:
@@ -236,9 +275,8 @@ def plot_roc_curve(y_true, y_scores_probs, filename='roc_curve.png'):
     except Exception as e:
         print(f"Error plotting ROC curve '{filename}': {e}")
 
-
 def plot_precision_recall_curve(y_true, y_scores_probs, filename='precision_recall_curve.png'):
-    if not hasattr(y_true, '__len__') or len(y_true) == 0:
+    if not (hasattr(y_true, '__len__') and len(y_true) > 0):
         print(f"Skipping Precision-Recall curve '{filename}', no true labels provided.")
         return
     if len(np.unique(y_true)) < 2:
@@ -260,8 +298,6 @@ def plot_precision_recall_curve(y_true, y_scores_probs, filename='precision_reca
     except Exception as e:
         print(f"Error plotting Precision-Recall curve '{filename}': {e}")
 
-
-# --- Загрузка данных ---
 def load_data():
     slut_files = []
     if os.path.exists(SLUT_DATA_DIR):
@@ -293,7 +329,6 @@ def load_data():
 
     return X, y
 
-# --- Построение модели (конфигурируемая) ---
 def create_configurable_model(params: dict):
     base_model_name = params.get("base_model", "resnet34")
 
@@ -314,6 +349,7 @@ def create_configurable_model(params: dict):
     elif unfreeze_strategy == "all":
         for param in model.parameters():
             param.requires_grad = True
+    # Add other strategies if needed
 
     num_ftrs = model.fc.in_features
 
@@ -331,18 +367,18 @@ def create_configurable_model(params: dict):
         fc_layers_list.append(nn.Dropout(fc_dropout))
         last_out_features = fc_units
 
-    fc_layers_list.append(nn.Linear(last_out_features, 1))
+    fc_layers_list.append(nn.Linear(last_out_features, 1)) # Output layer for binary classification
     model.fc = nn.Sequential(*fc_layers_list)
 
     return model.to(DEVICE)
 
-# --- Прогрессивное размораживание ---
 def unfreeze_layers(model, current_epoch, total_epochs, unfreeze_schedule_dict):
+    """Unfreezes layers based on the schedule."""
     layer_prefix_to_unfreeze = unfreeze_schedule_dict.get(current_epoch)
 
     if layer_prefix_to_unfreeze:
         unfrozen_now = False
-        print(f"\nAttempting to unfreeze layers starting with '{layer_prefix_to_unfreeze}' at epoch {current_epoch+1}...")
+        print(f"\nAttempting to unfreeze layers starting with '{layer_prefix_to_unfreeze}' at epoch {current_epoch + 1}...")
         for name, param in model.named_parameters():
             if name.startswith(layer_prefix_to_unfreeze) and not param.requires_grad:
                 param.requires_grad = True
@@ -353,23 +389,26 @@ def unfreeze_layers(model, current_epoch, total_epochs, unfreeze_schedule_dict):
         else:
             print(f"No new layers to unfreeze for prefix '{layer_prefix_to_unfreeze}' (either already unfrozen or prefix not found).")
 
-
-# --- Веса для WeightedRandomSampler ---
 def get_sampler_weights(labels):
-    if not labels: return torch.DoubleTensor([])
+    if not labels:
+        return torch.DoubleTensor([])
     class_counts = Counter(labels)
-    if not class_counts: return torch.DoubleTensor([])
+    if not class_counts:
+        return torch.DoubleTensor([])
 
     weight_per_class = {cls: 1.0 / count for cls, count in class_counts.items() if count > 0}
+
     if not weight_per_class:
         return torch.DoubleTensor([])
 
     weights = [weight_per_class.get(cls, 1.0) for cls in labels]
     return torch.DoubleTensor(weights)
 
+
 # --- Обучение модели ---
 def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler, num_epochs, patience_epochs, current_trial_num=None):
-    scaler = torch.amp.GradScaler(DEVICE.type if DEVICE.type == 'cuda' else 'cpu', enabled=(DEVICE.type == 'cuda'))
+    scaler = GradScaler(enabled=(DEVICE.type == 'cuda'))
+
     best_val_metric = -1.0
     metric_to_monitor = 'val_f1'
 
@@ -378,16 +417,18 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
 
     unfreeze_schedule_progressive = {}
     initially_all_unfrozen = all(p.requires_grad for p in model.parameters())
-    has_frozen_backbone_layers = any(not p.requires_grad for n,p in model.named_parameters() if not n.startswith('fc'))
+    has_frozen_backbone_layers = any(not p.requires_grad for n, p in model.named_parameters() if not n.startswith('fc'))
     is_optuna_trial_very_short_epochs = isinstance(current_trial_num, optuna.trial.Trial) and num_epochs < 5
+
 
     if num_epochs >= 5 and has_frozen_backbone_layers and not initially_all_unfrozen and not is_optuna_trial_very_short_epochs:
         print("Progressive unfreezing schedule will be applied.")
         schedule_points = sorted(list(set([
             max(0, num_epochs // 4 -1),
-            max(0, num_epochs // 3 -1),
-            max(0, (2 * num_epochs) // 3 -1)
+            max(0, num_epochs // 2 -1),
+            max(0, (3 * num_epochs) // 4 -1)
         ])))
+
         layer_prefixes = ['layer4', 'layer3', 'layer2']
         idx = 0
         for point in schedule_points:
@@ -399,7 +440,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
                 break
         print(f"Unfreeze schedule: {unfreeze_schedule_progressive}")
     elif not is_optuna_trial_very_short_epochs:
-        print("Progressive unfreezing schedule will NOT be applied.")
+        print("Progressive unfreezing schedule will NOT be applied (conditions not met or short Optuna trial).")
 
 
     for epoch in range(num_epochs):
@@ -409,12 +450,11 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
         if epoch in unfreeze_schedule_progressive:
             unfreeze_layers(model, epoch, num_epochs, unfreeze_schedule_progressive)
 
-
         desc_prefix = f'Trial {current_trial_num.number} ' if isinstance(current_trial_num, optuna.trial.Trial) else ''
-        progress_bar = tqdm(train_loader, desc=f'{desc_prefix}Epoch {epoch+1}/{num_epochs} [Training]', leave=False)
+        progress_bar = tqdm(train_loader, desc=f'{desc_prefix}Epoch {epoch + 1}/{num_epochs} [Training]', leave=False)
 
         if len(train_loader) == 0:
-            print(f"{desc_prefix}Epoch {epoch+1}/{num_epochs} - Train loader is empty. Skipping training for this epoch.")
+            print(f"{desc_prefix}Epoch {epoch + 1}/{num_epochs} - Train loader is empty. Skipping training for this epoch.")
             history['train_loss'].append(0)
         else:
             for inputs, labels in progress_bar:
@@ -436,8 +476,8 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
             history['train_loss'].append(epoch_train_loss)
 
         val_loss, val_acc, val_f1, val_roc_auc = 0.0, 0.0, 0.0, 0.0
-        if len(val_loader or []) == 0: # Handle val_loader being None or empty
-            print(f"{desc_prefix}Epoch {epoch+1}/{num_epochs} - Validation loader is empty or None. Skipping validation.")
+        if len(val_loader or []) == 0:
+            print(f"{desc_prefix}Epoch {epoch + 1}/{num_epochs} - Validation loader is empty or None. Skipping validation.")
             if isinstance(current_trial_num, optuna.trial.Trial):
                 print(f"Warning: Optuna trial {current_trial_num.number} cannot validate. Returning 0.0 F1-score.")
                 return 0.0
@@ -458,8 +498,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
                 lr_info_parts.append(f"LR-{group_name}: {group['lr']:.2e}")
         lr_info = ", ".join(lr_info_parts) if lr_info_parts else "LR: N/A"
 
-
-        print_msg = (f"{desc_prefix}Epoch {epoch+1}/{num_epochs} - Train Loss: {history['train_loss'][-1]:.4f}, Val Loss: {val_loss:.4f}, "
+        print_msg = (f"{desc_prefix}Epoch {epoch + 1}/{num_epochs} - Train Loss: {history['train_loss'][-1]:.4f}, Val Loss: {val_loss:.4f}, "
                      f"Val Acc: {val_acc:.4f}, Val F1: {val_f1:.4f}, Val ROC-AUC: {val_roc_auc:.4f}, {lr_info}")
 
         if not isinstance(current_trial_num, optuna.trial.Trial):
@@ -475,7 +514,7 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
                 best_val_metric = current_metric_val
                 no_improve_epochs = 0
                 if not isinstance(current_trial_num, optuna.trial.Trial):
-                    torch.save(model.state_dict(), BEST_MODEL_PATH)
+                    torch.save(model.state_dict(), BEST_STATE_DICT_PATH)
                     print(f"New best model saved with {metric_to_monitor}: {best_val_metric:.4f}")
             else:
                 no_improve_epochs += 1
@@ -483,48 +522,51 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
                      print(f"No improvement for {no_improve_epochs} epochs. Best {metric_to_monitor}: {best_val_metric:.4f}")
 
                 if no_improve_epochs >= patience_epochs:
-                    print(f"{desc_prefix}Early stopping triggered at epoch {epoch+1}.")
+                    print(f"{desc_prefix}Early stopping triggered at epoch {epoch + 1}.")
                     break
 
         if isinstance(current_trial_num, optuna.trial.Trial):
             current_trial_num.report(val_f1, epoch)
             if current_trial_num.should_prune():
                 del model, optimizer, criterion, scheduler, train_loader, val_loader, history, scaler
-                torch.cuda.empty_cache()
+                if DEVICE.type == 'cuda': torch.cuda.empty_cache()
                 raise optuna.exceptions.TrialPruned()
 
     if not isinstance(current_trial_num, optuna.trial.Trial):
         if history['train_loss']:
             plot_training_history(history)
-        if os.path.exists(BEST_MODEL_PATH) and best_val_metric >=0 :
-            print(f"Best model weights from this run saved to {BEST_MODEL_PATH} with {metric_to_monitor}: {best_val_metric:.4f}")
-            model.load_state_dict(torch.load(BEST_MODEL_PATH, map_location=DEVICE))
+        if os.path.exists(BEST_STATE_DICT_PATH) and best_val_metric >=0 :
+            print(f"Best model weights from this run saved to {BEST_STATE_DICT_PATH} with ...")
+            model.load_state_dict(torch.load(BEST_STATE_DICT_PATH, map_location=DEVICE))
             print("Loaded best model weights for potential further use.")
-        elif not os.path.exists(BEST_MODEL_PATH) and (not history['val_f1'] or best_val_metric < 0):
+        # FIXED: Use BEST_STATE_DICT_PATH instead of the undefined BEST_MODEL_PATH
+        elif not os.path.exists(BEST_STATE_DICT_PATH) and (not history['val_f1'] or best_val_metric < 0):
              print(f"Warning: No best model saved. Training might have been too short or no improvement seen. Best val F1: {best_val_metric:.4f}")
-        elif not os.path.exists(BEST_MODEL_PATH) and best_val_metric >= 0:
-             print(f"Warning: Best model path {BEST_MODEL_PATH} not found, but best metric was {best_val_metric:.4f}. Using last epoch model.")
-
+        elif not os.path.exists(BEST_STATE_DICT_PATH) and best_val_metric >= 0:
+             print(f"Warning: Best model path {BEST_STATE_DICT_PATH} not found, but best metric was {best_val_metric:.4f}. Using last epoch model.")
 
     if isinstance(current_trial_num, optuna.trial.Trial):
         return max(0.0, best_val_metric)
     else:
         return model
 
-# --- Оценка модели ---
+# --- (The rest of your functions remain the same) ---
+# ...
+# [No changes needed for evaluate_model, plot_training_history, export_to_onnx, quantize_model_dynamic, test_onnx_inference, objective, run_optuna_study]
+# ...
 def evaluate_model(model, loader, criterion, is_validation=False, is_optuna_trial=False):
     model.eval()
     running_loss = 0.0
     all_labels = []
-    all_predictions_binary = []
-    all_predictions_probs = []
+    all_predictions_binary = [] # Predictions after applying 0.5 threshold
+    all_predictions_probs = []  # Raw probabilities
 
     desc = "Validation" if is_validation else "Testing"
     disable_tqdm_eval = is_validation and is_optuna_trial
 
     if len(loader) == 0:
         if not is_validation: print(f"Warning: {desc} loader is empty. Cannot evaluate.")
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 # loss, acc, f1, roc_auc, precision, recall
 
     progress_bar = tqdm(loader, desc=desc, leave=False, disable=disable_tqdm_eval)
 
@@ -540,7 +582,7 @@ def evaluate_model(model, loader, criterion, is_validation=False, is_optuna_tria
                 loss = None
 
             probs = torch.sigmoid(logits)
-            predicted_binary = (probs > 0.5).float() # Используется порог 0.5 по умолчанию для evaluate_model
+            predicted_binary = (probs > 0.5).float()
 
             all_labels.extend(labels.cpu().numpy().flatten())
             all_predictions_binary.extend(predicted_binary.cpu().numpy().flatten())
@@ -548,6 +590,7 @@ def evaluate_model(model, loader, criterion, is_validation=False, is_optuna_tria
 
             if is_validation and loss is not None:
                  progress_bar.set_postfix(loss=loss.item())
+
 
     avg_loss = running_loss / len(loader.dataset) if len(loader.dataset) > 0 and criterion is not None else 0.0
 
@@ -573,8 +616,7 @@ def evaluate_model(model, loader, criterion, is_validation=False, is_optuna_tria
     elif not is_validation and len(y_true_np) > 0 :
          print(f"Warning: ROC-AUC could not be computed for {desc} (only one class in y_true). Setting to 0.")
 
-
-    if not is_validation: # Для финального теста метрики печатаются отдельно с оптимальным порогом
+    if not is_validation:
         print(f"\n--- {desc} Results (threshold 0.5) ---")
         if criterion is not None: print(f"Loss: {avg_loss:.4f}")
         print(f"Accuracy: {accuracy:.4f}")
@@ -585,10 +627,9 @@ def evaluate_model(model, loader, criterion, is_validation=False, is_optuna_tria
 
     return avg_loss, accuracy, f1, roc_auc, precision, recall
 
-# --- График истории обучения ---
 def plot_training_history(history):
     if not history or not history.get('train_loss'):
-        print("Skipping training history plot: history is empty.")
+        print("Skipping training history plot: history is empty or lacks 'train_loss'.")
         return
 
     epochs_range = range(1, len(history['train_loss']) + 1)
@@ -596,26 +637,32 @@ def plot_training_history(history):
 
     plt.subplot(1, 3, 1)
     plt.plot(epochs_range, history['train_loss'], label='Train Loss')
-    if history.get('val_loss'): plt.plot(epochs_range, history['val_loss'], label='Val Loss')
+    if history.get('val_loss'):
+        plt.plot(epochs_range, history['val_loss'], label='Val Loss')
     plt.title('Training and Validation Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
 
     plt.subplot(1, 3, 2)
-    if history.get('val_acc'): plt.plot(epochs_range, history['val_acc'], label='Val Accuracy')
-    if history.get('val_f1'): plt.plot(epochs_range, history['val_f1'], label='Val F1-score')
+    if history.get('val_acc'):
+        plt.plot(epochs_range, history['val_acc'], label='Val Accuracy')
+    if history.get('val_f1'):
+        plt.plot(epochs_range, history['val_f1'], label='Val F1-score')
     plt.title('Validation Accuracy & F1-score')
     plt.xlabel('Epoch')
     plt.ylabel('Metric Value')
-    plt.legend()
+    if history.get('val_acc') or history.get('val_f1'):
+        plt.legend()
 
     plt.subplot(1, 3, 3)
-    if history.get('val_roc_auc'): plt.plot(epochs_range, history['val_roc_auc'], label='Val ROC-AUC')
+    if history.get('val_roc_auc'):
+        plt.plot(epochs_range, history['val_roc_auc'], label='Val ROC-AUC')
     plt.title('Validation ROC-AUC')
     plt.xlabel('Epoch')
     plt.ylabel('ROC-AUC')
-    plt.legend()
+    if history.get('val_roc_auc'):
+        plt.legend()
 
     plt.tight_layout()
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -623,14 +670,13 @@ def plot_training_history(history):
     plt.close()
     print(f"Training history plot saved to {os.path.join(RESULTS_DIR, 'training_history.png')}")
 
-# --- Экспорт и Квантование ---
 def export_to_onnx(model_to_export, input_shape=(1, 3, IMG_SIZE, IMG_SIZE)):
     if model_to_export is None:
         print("Skipping ONNX export: model is None.")
         return
     try:
         import onnx
-        import onnxruntime # noqa
+        import onnxruntime
     except ImportError:
         print("ONNX and/or onnxruntime not installed. Skipping ONNX export.")
         return
@@ -649,7 +695,8 @@ def export_to_onnx(model_to_export, input_shape=(1, 3, IMG_SIZE, IMG_SIZE)):
             opset_version=12,
             input_names=['input'],
             output_names=['output_logits'],
-            dynamic_axes={'input': {0: 'batch_size'}, 'output_logits': {0: 'batch_size'}}
+            dynamic_axes={'input': {0: 'batch_size'},
+                          'output_logits': {0: 'batch_size'}}
         )
         print(f"ONNX model saved to {ONNX_PATH}")
 
@@ -660,7 +707,7 @@ def export_to_onnx(model_to_export, input_shape=(1, 3, IMG_SIZE, IMG_SIZE)):
     except Exception as e:
         print(f"Error during ONNX export or check: {e}")
     finally:
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and DEVICE.type == 'cuda':
             model_to_export.to(DEVICE)
 
 def quantize_model_dynamic(model_to_quantize):
@@ -673,14 +720,19 @@ def quantize_model_dynamic(model_to_quantize):
 
     os.makedirs(os.path.dirname(QUANTIZED_MODEL_PATH), exist_ok=True)
 
-    model_quantized = torch.quantization.quantize_dynamic(
-        model_to_quantize, {nn.Linear, nn.Conv2d}, dtype=torch.qint8
-    )
-    torch.save(model_quantized.state_dict(), QUANTIZED_MODEL_PATH)
-    print(f"Dynamically quantized model state_dict saved to {QUANTIZED_MODEL_PATH}")
-
-    if torch.cuda.is_available():
-        model_to_quantize.to(DEVICE)
+    try:
+        from torch.quantization import quantize_dynamic
+        model_quantized = quantize_dynamic(
+            model_to_quantize, {nn.Linear, nn.Conv2d}, dtype=torch.qint8
+        )
+        torch.save(model_quantized.state_dict(), QUANTIZED_MODEL_PATH)
+        print(f"Dynamically quantized model state_dict saved to {QUANTIZED_MODEL_PATH}")
+    except Exception as e:
+        print(f"Error during dynamic quantization: {e}")
+        model_quantized = None
+    finally:
+        if torch.cuda.is_available() and DEVICE.type == 'cuda':
+            model_to_quantize.to(DEVICE)
     return model_quantized
 
 def test_onnx_inference():
@@ -706,8 +758,6 @@ def test_onnx_inference():
     except Exception as e:
         print(f"Error during ONNX inference test: {e}")
 
-
-# --- Optuna Objective Function ---
 def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_val):
     params = {
         "base_model": trial.suggest_categorical("base_model", ["resnet18", "resnet34"]),
@@ -730,7 +780,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
     if len(train_dataset_optuna) == 0 or len(val_dataset_optuna) == 0:
         print(f"Warning: Optuna trial {trial.number} has empty train or val dataset. Pruning.")
         del model, train_dataset_optuna, val_dataset_optuna
-        torch.cuda.empty_cache()
+        if DEVICE.type == 'cuda': torch.cuda.empty_cache()
         raise optuna.exceptions.TrialPruned()
 
     train_counts_optuna = Counter(y_train)
@@ -742,7 +792,16 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
         sampler_optuna = None
         shuffle_train_optuna = True
 
-    optuna_num_workers = min(2, os.cpu_count() // 2 if os.cpu_count() else 1)
+    num_cpus = os.cpu_count()
+    MAX_RECOMMENDED_WORKERS_OPTUNA = 16
+    if num_cpus is None:
+        optuna_num_workers = 4
+        print(f"Optuna Trial {trial.number}: Could not determine CPU count. Setting num_workers to {optuna_num_workers}.")
+    else:
+        optuna_num_workers = max(1, min(num_cpus // 2, MAX_RECOMMENDED_WORKERS_OPTUNA))
+    if trial.number == 0:
+        print(f"Optuna CPUs available: {num_cpus}. Setting num_workers for Optuna trials to {optuna_num_workers} (capped at {MAX_RECOMMENDED_WORKERS_OPTUNA}).")
+
     optuna_batch_size = BATCH_SIZE
 
     drop_last_train_optuna = (len(train_dataset_optuna) > optuna_batch_size and
@@ -751,15 +810,18 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
     train_loader_optuna = DataLoader(train_dataset_optuna, batch_size=optuna_batch_size, sampler=sampler_optuna,
                                      shuffle=shuffle_train_optuna, num_workers=optuna_num_workers,
                                      pin_memory=True if DEVICE.type == 'cuda' else False,
+                                     persistent_workers=True if optuna_num_workers > 0 and DEVICE.type == 'cuda' else False,
                                      drop_last=drop_last_train_optuna)
     val_loader_optuna = DataLoader(val_dataset_optuna, batch_size=optuna_batch_size, shuffle=False,
                                    num_workers=optuna_num_workers,
-                                   pin_memory=True if DEVICE.type == 'cuda' else False)
+                                   pin_memory=True if DEVICE.type == 'cuda' else False,
+                                   persistent_workers=True if optuna_num_workers > 0 and DEVICE.type == 'cuda' else False)
+
 
     if len(train_loader_optuna) == 0 or len(val_loader_optuna) == 0:
         print(f"Warning: Optuna trial {trial.number} has empty DataLoader (train: {len(train_loader_optuna)}, val: {len(val_loader_optuna)}). Pruning.")
         del model, train_dataset_optuna, val_dataset_optuna
-        torch.cuda.empty_cache()
+        if DEVICE.type == 'cuda': torch.cuda.empty_cache()
         raise optuna.exceptions.TrialPruned()
 
     optimizer_grouped_parameters = []
@@ -771,9 +833,9 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
         optimizer_grouped_parameters.append({'params': backbone_params_list, 'lr': lr_backbone, 'name': 'backbone'})
 
     if not optimizer_grouped_parameters or not any(pg.get('params') for pg in optimizer_grouped_parameters):
-        print(f"Warning: Optuna trial {trial.number} - no parameters to optimize. Check model config. Pruning.")
+        print(f"Warning: Optuna trial {trial.number} - no parameters to optimize. Check model config and unfreeze strategy. Pruning.")
         del model
-        torch.cuda.empty_cache()
+        if DEVICE.type == 'cuda': torch.cuda.empty_cache()
         raise optuna.exceptions.TrialPruned()
 
     optimizer = optim.AdamW(optimizer_grouped_parameters, weight_decay=weight_decay)
@@ -784,6 +846,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
         pos_weight_value = 1.0
     pos_weight_tensor = torch.tensor([pos_weight_value], device=DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
+
     scheduler_patience = max(1, OPTUNA_PATIENCE // 2) if OPTUNA_EPOCHS > 2 else 0
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=scheduler_patience, min_lr=1e-7)
 
@@ -792,20 +855,25 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
                                num_epochs=OPTUNA_EPOCHS, patience_epochs=OPTUNA_PATIENCE, current_trial_num=trial)
 
     del model, optimizer, criterion, scheduler, train_loader_optuna, val_loader_optuna, train_dataset_optuna, val_dataset_optuna
-    torch.cuda.empty_cache()
+    if DEVICE.type == 'cuda':
+        torch.cuda.empty_cache()
 
     return val_f1_score
 
-
-# --- Функция для запуска Optuna Study ---
 def run_optuna_study():
     X_all, y_all = load_data()
-    if len(X_all) == 0: print("Error: No data loaded for Optuna. Exiting."); return None
-    if len(Counter(y_all)) < 2: print(f"Error: Only one class found in all data. Optuna needs at least two. Exiting."); return None
+    if len(X_all) == 0:
+        print("Error: No data loaded for Optuna. Exiting.")
+        return None
+    if len(Counter(y_all)) < 2:
+        print(f"Error: Only one class found in all data ({Counter(y_all)}). Optuna needs at least two. Exiting.")
+        return None
 
     X_for_optuna_and_final_train, _, y_for_optuna_and_final_train, _ = train_test_split(
-        X_all, y_all, train_size=(1.0 - FINAL_TEST_SET_FRACTION),
-        random_state=42, stratify=y_all
+        X_all, y_all,
+        train_size=(1.0 - FINAL_TEST_SET_FRACTION),
+        random_state=42, stratify=y_all,
+        shuffle=True
     )
 
     if OPTUNA_DATASET_FRACTION < 1.0 and len(X_for_optuna_and_final_train) > 0 :
@@ -813,19 +881,19 @@ def run_optuna_study():
             X_for_optuna_and_final_train, y_for_optuna_and_final_train,
             train_size=OPTUNA_DATASET_FRACTION,
             random_state=43,
-            stratify=y_for_optuna_and_final_train
+            stratify=y_for_optuna_and_final_train,
+            shuffle=True
         )
-        print(f"Using {len(X_optuna_subset)} samples ({OPTUNA_DATASET_FRACTION*100:.1f}% of data available after reserving final test set) for Optuna search.")
+        print(f"Using {len(X_optuna_subset)} samples ({OPTUNA_DATASET_FRACTION * 100:.1f}% of data available after reserving final test set) for Optuna search.")
     elif len(X_for_optuna_and_final_train) > 0:
         X_optuna_subset, y_optuna_subset = X_for_optuna_and_final_train, y_for_optuna_and_final_train
         print(f"Using all {len(X_optuna_subset)} samples (data available after reserving final test set) for Optuna search.")
     else:
-        print(f"Warning: No data available for Optuna after reserving final test set. Skipping Optuna.")
+        print(f"Warning: No data available for Optuna after reserving final test set (size: {len(X_for_optuna_and_final_train)}). Skipping Optuna.")
         return None
 
-
     if len(X_optuna_subset) < BATCH_SIZE * 2 :
-        print(f"Warning: Optuna subset is too small ({len(X_optuna_subset)} samples). Skipping Optuna study.")
+        print(f"Warning: Optuna subset is too small ({len(X_optuna_subset)} samples, need at least {BATCH_SIZE*2}). Skipping Optuna study.")
         return None
     if len(Counter(y_optuna_subset)) < 2:
         print(f"Warning: Optuna subset ({Counter(y_optuna_subset)}) does not contain both classes. Skipping Optuna study.")
@@ -835,15 +903,17 @@ def run_optuna_study():
         X_optuna_subset, y_optuna_subset,
         test_size=0.25,
         random_state=44,
-        stratify=y_optuna_subset
+        stratify=y_optuna_subset,
+        shuffle=True
     )
 
     print(f"\n--- Optuna Data Split (from subset) ---")
     print(f"Optuna Train set: {len(X_train_opt)} samples ({Counter(y_train_opt)})")
     print(f"Optuna Validation set: {len(X_val_opt)} samples ({Counter(y_val_opt)})")
 
-    if len(X_train_opt) < BATCH_SIZE or len(X_val_opt) < BATCH_SIZE or len(Counter(y_train_opt))<2 or len(Counter(y_val_opt))<2:
-        print("Warning: Optuna train or validation set is too small or does not contain both classes. Skipping Optuna study.")
+    if len(X_train_opt) < BATCH_SIZE or len(X_val_opt) < BATCH_SIZE or \
+       len(Counter(y_train_opt)) < 2 or len(Counter(y_val_opt)) < 2:
+        print("Warning: Optuna train or validation set is too small or does not contain both classes after split. Skipping Optuna study.")
         return None
 
     n_warmup_steps_pruner = 0 if OPTUNA_EPOCHS < 3 else OPTUNA_EPOCHS // 3
@@ -866,7 +936,6 @@ def run_optuna_study():
             print("Optimization interrupted, but returning best trial found so far.")
         else:
             return None
-
 
     print("\n--- Optuna Study Finished ---")
     completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None]
@@ -894,10 +963,10 @@ def run_optuna_study():
         print("Optuna study completed, but no best trial found (possibly all trials failed or were pruned before completion or returned None).")
         return None
 
-
 # --- Основная функция ---
+
 def main():
-    global OPTIMAL_THRESHOLD # Для обновления глобальной переменной
+    global OPTIMAL_THRESHOLD
 
     params_for_final_training = None
     model_trained = None
@@ -938,41 +1007,59 @@ def main():
 
     X_all, y_all = load_data()
 
-    if len(X_all) == 0: print("Error: No data loaded for final training. Exiting."); return
-    if len(Counter(y_all)) < 2: print(f"Error: Only one class found in total data. Exiting."); return
+    if len(X_all) == 0:
+        print("Error: No data loaded for final training. Exiting.")
+        return
+    if len(Counter(y_all)) < 2:
+        print(f"Error: Only one class found in total data ({Counter(y_all)}). Final training requires at least two. Exiting.")
+        return
 
-    # X_test_final и y_test_final будут содержать пути и метки для финального теста
     X_train_full, X_test_final, y_train_full, y_test_final = train_test_split(
-        X_all, y_all, test_size=FINAL_TEST_SET_FRACTION, random_state=42, stratify=y_all
+        X_all, y_all,
+        test_size=FINAL_TEST_SET_FRACTION,
+        random_state=42,
+        stratify=y_all,
+        shuffle=True
     )
 
     print(f"\n--- Final Training Data Split (on ALL data) ---")
     print(f"Full Train set for final model: {len(X_train_full)} samples ({Counter(y_train_full)})")
     print(f"Final Test set for final model: {len(X_test_final)} samples ({Counter(y_test_final)})")
 
-    if not y_train_full or len(Counter(y_train_full))<2 :
+    if not y_train_full or len(Counter(y_train_full)) < 2 :
         print("Critical Error: Training data for final model is insufficient or lacks class diversity. Exiting.")
         return
-    if not y_test_final or len(Counter(y_test_final))<2:
+    if not y_test_final or len(Counter(y_test_final)) < 2:
          print("Warning: Final test set is empty or does not contain both classes. Some evaluation metrics might be affected or unavailable.")
-
 
     sampler_weights = get_sampler_weights(y_train_full)
     if len(sampler_weights) > 0:
         sampler = WeightedRandomSampler(sampler_weights, num_samples=len(sampler_weights), replacement=True)
         shuffle_train = False
     else:
-        print("Warning: Could not create sampler weights for final training. Using shuffle=True.")
+        print("Warning: Could not create sampler weights for final training (e.g., single class). Using shuffle=True.")
         sampler = None
         shuffle_train = True
-
 
     train_dataset = NSFWDataset(X_train_full, y_train_full, train_transform, cache_ram=True)
     test_dataset = NSFWDataset(X_test_final, y_test_final, val_transform, cache_ram=False)
 
-    if len(train_dataset) == 0: print("Error: Final training dataset is empty. Exiting."); return
+    if len(train_dataset) == 0:
+        print("Error: Final training dataset is empty. Exiting.")
+        return
 
-    final_num_workers = max(1, min(4, os.cpu_count() // 2 if os.cpu_count() else 1))
+    num_cpus_final = os.cpu_count()
+    MAX_RECOMMENDED_WORKERS_FINAL = 24
+    if num_cpus_final is None:
+        final_num_workers = 4
+        print(f"Could not determine CPU count. Setting final_num_workers to {final_num_workers}.")
+    else:
+        if num_cpus_final <= 2:
+            final_num_workers = num_cpus_final
+        else:
+            final_num_workers = max(1, min(num_cpus_final - 2, MAX_RECOMMENDED_WORKERS_FINAL))
+    print(f"Final training CPUs available: {num_cpus_final}. Setting final_num_workers to {final_num_workers} (capped at {MAX_RECOMMENDED_WORKERS_FINAL}).")
+
 
     drop_last_final_train = (len(train_dataset) > BATCH_SIZE and
                              len(train_dataset) % BATCH_SIZE == 1)
@@ -980,13 +1067,18 @@ def main():
     train_loader = DataLoader(
         train_dataset, batch_size=BATCH_SIZE, sampler=sampler, shuffle=shuffle_train,
         num_workers=final_num_workers, pin_memory=True if DEVICE.type == 'cuda' else False,
+        persistent_workers=True if final_num_workers > 0 and DEVICE.type == 'cuda' else False,
         drop_last=drop_last_final_train
     )
 
-    test_loader = DataLoader(
-        test_dataset, batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=final_num_workers, pin_memory=True if DEVICE.type == 'cuda' else False
-    ) if len(test_dataset) > 0 else []
+    test_loader_num_workers = final_num_workers
+    test_loader = []
+    if len(test_dataset) > 0:
+        test_loader = DataLoader(
+            test_dataset, batch_size=BATCH_SIZE, shuffle=False,
+            num_workers=test_loader_num_workers, pin_memory=True if DEVICE.type == 'cuda' else False,
+            persistent_workers=True if test_loader_num_workers > 0 and DEVICE.type == 'cuda' else False
+        )
 
     if len(train_loader) == 0:
         print("Error: Final training DataLoader is empty (possibly due to small dataset and drop_last). Exiting.")
@@ -1030,144 +1122,148 @@ def main():
     model_trained = train_model(model_trained, train_loader, val_loader_for_final_train, optimizer, criterion, scheduler,
                                 num_epochs=EPOCHS, patience_epochs=PATIENCE, current_trial_num=None)
 
-    # Финальная оценка и сохранение данных для SHAP
     if len(test_loader) > 0 and model_trained is not None:
         print("\n--- Final Model Evaluation on Independent Test Set & SHAP Data Preparation ---")
         model_for_eval = None
-        if os.path.exists(BEST_MODEL_PATH):
-            print(f"Loading best saved model from {BEST_MODEL_PATH} for final evaluation.")
+        # FIXED: Use BEST_STATE_DICT_PATH instead of BEST_MODEL_PATH
+        if os.path.exists(BEST_STATE_DICT_PATH):
+            print(f"Loading best saved model from {BEST_STATE_DICT_PATH} for final evaluation.")
             model_for_eval = create_configurable_model(params_for_final_training)
             try:
-                model_for_eval.load_state_dict(torch.load(BEST_MODEL_PATH, map_location=DEVICE))
+                model_for_eval.load_state_dict(torch.load(BEST_STATE_DICT_PATH, map_location=DEVICE))
                 print("Successfully loaded best model weights.")
             except Exception as e:
-                print(f"Error loading best model weights from {BEST_MODEL_PATH}: {e}. Using model from last training epoch.")
+                # FIXED: Use BEST_STATE_DICT_PATH in the error message
+                print(f"Error loading best model weights from {BEST_STATE_DICT_PATH}: {e}. Using model from last training epoch if available.")
                 model_for_eval = model_trained
         else:
-            print(f"Warning: Best model file {BEST_MODEL_PATH} not found. Using model from last training epoch.")
+            # FIXED: Use BEST_STATE_DICT_PATH in the warning message
+            print(f"Warning: Best model file {BEST_STATE_DICT_PATH} not found. Using model from last training epoch if available.")
             model_for_eval = model_trained
 
-        _ = evaluate_model(model_for_eval, test_loader, criterion, is_validation=False, is_optuna_trial=False) # Оценка с порогом 0.5
-
-        model_for_eval.eval()
-        all_final_labels_eval = []
-        all_final_scores_probs_eval = []
-
-        # `X_test_final` содержит пути, `y_test_final` - истинные метки, которые уже есть в `test_dataset`
-        # Порядок должен сохраняться, так как `shuffle=False` в `test_loader`
-        actual_filepaths_for_final_test = X_test_final
-
-        if len(test_loader.dataset) > 0:
-            with torch.no_grad():
-                for inputs, labels_batch in tqdm(test_loader, desc="Generating final predictions for reports & SHAP data"):
-                    inputs = inputs.to(DEVICE)
-                    logits = model_for_eval(inputs)
-                    probs = torch.sigmoid(logits).cpu()
-
-                    all_final_labels_eval.extend(labels_batch.numpy().flatten())
-                    all_final_scores_probs_eval.extend(probs.numpy().flatten())
-
-            if all_final_labels_eval:
-                # --- Сохранение путей и меток финального тестового набора для SHAP ---
-                if actual_filepaths_for_final_test and len(actual_filepaths_for_final_test) == len(all_final_labels_eval):
-                    os.makedirs(RESULTS_DIR, exist_ok=True)
-                    with open(FINAL_TEST_DATA_PATHS_FILE, "w") as f:
-                        for path in actual_filepaths_for_final_test:
-                            f.write(f"{path}\n")
-                    print(f"Saved final test data paths to {FINAL_TEST_DATA_PATHS_FILE}")
-
-                    with open(FINAL_TEST_DATA_LABELS_FILE, "w") as f:
-                        for label in all_final_labels_eval:
-                            f.write(f"{int(label)}\n")
-                    print(f"Saved final test data labels to {FINAL_TEST_DATA_LABELS_FILE}")
-                else:
-                    print(f"Warning: Mismatch or empty actual_filepaths_for_final_test ({len(actual_filepaths_for_final_test)}) and all_final_labels_eval ({len(all_final_labels_eval)}). SHAP background data might be incorrect.")
-
-                # --- Расчет и сохранение оптимального порога ---
-                current_optimal_threshold = 0.5 # Локальный дефолт
-                if len(np.unique(all_final_labels_eval)) > 1:
-                    try:
-                        precision_rt, recall_rt, thresholds_rt = precision_recall_curve(all_final_labels_eval, all_final_scores_probs_eval)
-                        
-                        # precision_rt и recall_rt на один элемент длиннее thresholds_rt.
-                        # Последние значения (1.0, 0.0) не имеют соответствующего порога.
-                        # Используем все, кроме последнего элемента p и r для F1, чтобы они соответствовали thresholds_rt.
-                        valid_precision = precision_rt[:-1]
-                        valid_recall = recall_rt[:-1]
-
-                        # Избегаем деления на ноль
-                        fscores_for_thresholds_denominator = (valid_precision + valid_recall)
-                        fscores_for_thresholds = np.zeros_like(fscores_for_thresholds_denominator)
-                        valid_indices = fscores_for_thresholds_denominator > 1e-9 # Маленькое эпсилон для избежания деления на ноль
-                        
-                        fscores_for_thresholds[valid_indices] = (2 * valid_precision[valid_indices] * valid_recall[valid_indices]) / fscores_for_thresholds_denominator[valid_indices]
-
-                        if len(fscores_for_thresholds) > 0 and len(thresholds_rt) > 0 and len(fscores_for_thresholds) == len(thresholds_rt):
-                            ix = np.argmax(fscores_for_thresholds)
-                            current_optimal_threshold = thresholds_rt[ix]
-                            print(f"Optimal threshold based on F1-score on test set: {current_optimal_threshold:.4f} (F1: {fscores_for_thresholds[ix]:.4f})")
-                        else:
-                            print(f"Warning: Could not reliably determine optimal threshold from PR curve (lengths mismatch or empty arrays). F_len:{len(fscores_for_thresholds)}, T_len:{len(thresholds_rt)}. Using default 0.5.")
-                            current_optimal_threshold = 0.5
-                    except Exception as e_thresh:
-                        print(f"Error calculating optimal threshold: {e_thresh}. Using default 0.5.")
-                else:
-                    print("Warning: Not enough class diversity in final test labels to calculate optimal threshold from PR curve. Using default 0.5.")
-
-                OPTIMAL_THRESHOLD = current_optimal_threshold # Обновляем глобальную переменную
-                joblib.dump({'optimal_threshold': OPTIMAL_THRESHOLD}, OPTIMAL_THRESHOLD_PATH)
-                print(f"Saved optimal threshold ({OPTIMAL_THRESHOLD:.4f}) to {OPTIMAL_THRESHOLD_PATH}")
-
-                # Пересчитываем бинарные предсказания с оптимальным порогом
-                all_final_pred_binary_optimal = (np.array(all_final_scores_probs_eval) >= OPTIMAL_THRESHOLD).astype(int).tolist()
-
-                # Генерация отчетов с оптимальным порогом
-                save_metrics_report(all_final_labels_eval, all_final_pred_binary_optimal, all_final_scores_probs_eval, filename='final_test_metrics_report_optimal_thresh.txt')
-                plot_confusion_matrix(all_final_labels_eval, all_final_pred_binary_optimal, filename='final_test_confusion_matrix_optimal_thresh.png')
-                plot_roc_curve(all_final_labels_eval, all_final_scores_probs_eval, filename='final_test_roc_curve.png')
-                plot_precision_recall_curve(all_final_labels_eval, all_final_scores_probs_eval, filename='final_test_precision_recall_curve.png')
-            else:
-                print("No labels/predictions generated for final reports (test_loader might be effectively empty or issue with labels).")
+        if model_for_eval is None:
+            print("Error: No model available for final evaluation. Skipping.")
         else:
-            print("Final test dataset is empty. Skipping report generation and SHAP data saving.")
+            model_for_eval.to(DEVICE).eval()
+
+            _ = evaluate_model(model_for_eval, test_loader, criterion, is_validation=False, is_optuna_trial=False)
+
+            all_final_labels_eval = []
+            all_final_scores_probs_eval = []
+
+            actual_filepaths_for_final_test = X_test_final
+
+            if len(test_loader.dataset) > 0:
+                with torch.no_grad():
+                    for inputs, labels_batch in tqdm(test_loader, desc="Generating final predictions for reports & SHAP data"):
+                        inputs = inputs.to(DEVICE)
+                        logits = model_for_eval(inputs)
+                        probs = torch.sigmoid(logits).cpu()
+
+                        all_final_labels_eval.extend(labels_batch.numpy().flatten())
+                        all_final_scores_probs_eval.extend(probs.numpy().flatten())
+
+                if all_final_labels_eval:
+                    if actual_filepaths_for_final_test and len(actual_filepaths_for_final_test) == len(all_final_labels_eval):
+                        os.makedirs(RESULTS_DIR, exist_ok=True)
+                        with open(FINAL_TEST_DATA_PATHS_FILE, "w") as f:
+                            for path in actual_filepaths_for_final_test:
+                                f.write(f"{path}\n")
+                        print(f"Saved final test data paths to {FINAL_TEST_DATA_PATHS_FILE}")
+
+                        with open(FINAL_TEST_DATA_LABELS_FILE, "w") as f:
+                            for label in all_final_labels_eval:
+                                f.write(f"{int(label)}\n")
+                        print(f"Saved final test data labels to {FINAL_TEST_DATA_LABELS_FILE}")
+                    else:
+                        print(f"Warning: Mismatch or empty actual_filepaths_for_final_test ({len(actual_filepaths_for_final_test)}) "
+                              f"and all_final_labels_eval ({len(all_final_labels_eval)}). "
+                              f"SHAP background data files might be incorrect or not saved.")
+
+                    current_optimal_threshold = 0.5
+                    if len(np.unique(all_final_labels_eval)) > 1:
+                        try:
+                            precision_rt, recall_rt, thresholds_rt = precision_recall_curve(all_final_labels_eval, all_final_scores_probs_eval)
+                            valid_precision = precision_rt[:-1]
+                            valid_recall = recall_rt[:-1]
+
+                            fscores_for_thresholds_denominator = (valid_precision + valid_recall)
+                            fscores_for_thresholds = np.zeros_like(fscores_for_thresholds_denominator)
+                            valid_indices = fscores_for_thresholds_denominator > 1e-9
+                            fscores_for_thresholds[valid_indices] = (2 * valid_precision[valid_indices] * valid_recall[valid_indices]) / \
+                                                                    fscores_for_thresholds_denominator[valid_indices]
+
+                            if len(fscores_for_thresholds) > 0 and len(thresholds_rt) > 0 and \
+                               len(fscores_for_thresholds) == len(thresholds_rt):
+                                ix = np.argmax(fscores_for_thresholds)
+                                current_optimal_threshold = thresholds_rt[ix]
+                                print(f"Optimal threshold based on F1-score on test set: {current_optimal_threshold:.4f} (F1: {fscores_for_thresholds[ix]:.4f})")
+                            else:
+                                print(f"Warning: Could not reliably determine optimal threshold from PR curve. Using default 0.5.")
+                                current_optimal_threshold = 0.5
+                        except Exception as e_thresh:
+                            print(f"Error calculating optimal threshold: {e_thresh}. Using default 0.5.")
+                    else:
+                        print("Warning: Not enough class diversity in final test labels to calculate optimal threshold. Using default 0.5.")
+
+                    OPTIMAL_THRESHOLD = current_optimal_threshold
+                    joblib.dump({'optimal_threshold': OPTIMAL_THRESHOLD}, OPTIMAL_THRESHOLD_PATH)
+                    print(f"Saved optimal threshold ({OPTIMAL_THRESHOLD:.4f}) to {OPTIMAL_THRESHOLD_PATH}")
+
+                    all_final_pred_binary_optimal = (np.array(all_final_scores_probs_eval) >= OPTIMAL_THRESHOLD).astype(int).tolist()
+
+                    save_metrics_report(all_final_labels_eval, all_final_pred_binary_optimal, all_final_scores_probs_eval,
+                                        filename='final_test_metrics_report_optimal_thresh.txt')
+                    plot_confusion_matrix(all_final_labels_eval, all_final_pred_binary_optimal,
+                                          filename='final_test_confusion_matrix_optimal_thresh.png')
+                    plot_roc_curve(all_final_labels_eval, all_final_scores_probs_eval,
+                                   filename='final_test_roc_curve.png')
+                    plot_precision_recall_curve(all_final_labels_eval, all_final_scores_probs_eval,
+                                                filename='final_test_precision_recall_curve.png')
+                else:
+                    print("No labels/predictions generated for final reports.")
+            else:
+                print("Final test dataset (loader.dataset) is empty. Skipping report generation and SHAP data saving.")
 
     elif model_trained is None:
         print("\nSkipping final model evaluation as model training failed or model is None.")
     else:
         print("\nSkipping final model evaluation on test set as test_loader is empty.")
 
-
     print("\n--- Exporting and Quantizing Model ---")
-    model_to_export = None
-    if os.path.exists(BEST_MODEL_PATH) and model_trained is not None:
-        print(f"Using best saved model from {BEST_MODEL_PATH} for export.")
-        model_to_export = create_configurable_model(params_for_final_training)
+    model_to_export_and_quantize = None
+    # FIXED: Use BEST_STATE_DICT_PATH
+    if os.path.exists(BEST_STATE_DICT_PATH) and model_trained is not None:
+        print(f"Using best saved model from {BEST_STATE_DICT_PATH} for export and quantization.")
+        model_to_export_and_quantize = create_configurable_model(params_for_final_training)
         try:
-            model_to_export.load_state_dict(torch.load(BEST_MODEL_PATH, map_location='cpu'))
-            model_to_export.eval()
+            # FIXED: Use BEST_STATE_DICT_PATH
+            model_to_export_and_quantize.load_state_dict(torch.load(BEST_STATE_DICT_PATH, map_location='cpu'))
+            model_to_export_and_quantize.eval()
         except Exception as e:
             print(f"Failed to load best model for export: {e}. Using model from last training epoch if available.")
             if model_trained:
-                model_to_export = model_trained
-                model_to_export.to('cpu').eval()
-            else: model_to_export = None
+                model_to_export_and_quantize = model_trained
+                model_to_export_and_quantize.to('cpu').eval()
+            else: model_to_export_and_quantize = None
     elif model_trained is not None:
         print("Using model from last training epoch for export (best model not found or not saved).")
-        model_to_export = model_trained
-        model_to_export.to('cpu').eval()
+        model_to_export_and_quantize = model_trained
+        model_to_export_and_quantize.to('cpu').eval()
     else:
-        print("No model available for export.")
+        print("No model available for export (training might have failed or was skipped).")
 
-    if model_to_export:
-        export_to_onnx(model_to_export)
+    if model_to_export_and_quantize:
+        export_to_onnx(model_to_export_and_quantize)
         test_onnx_inference()
-        # quantized_model = quantize_model_dynamic(model_to_export)
+        # quantized_model = quantize_model_dynamic(model_to_export_and_quantize)
+        # if quantized_model:
+        #    print("Quantized model created.")
     else:
         print("Skipping export and quantization as no model is available.")
 
 
     print("\n--- Script Finished ---")
-
 
 if __name__ == "__main__":
     main()

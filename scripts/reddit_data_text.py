@@ -15,13 +15,7 @@ USER_AGENT = os.getenv('USER_AGENT')
 
 # Субреддиты для парсинга
 RUSSIAN_SUBREDDITS = [
-    'Pikabu',
-    'liberta',
-    'epicentr',
-    'RUbook',
-    'Moscow',
-    'SPb',
-    'Kafka'
+    'KafkaFPS',
 ]
 
 # Настройки сохранения
@@ -29,8 +23,8 @@ SAVE_PATH = "data/reddit/text_posts"
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 # Лимиты
-POST_LIMIT_PER_SUBREDDIT = 100000000
-COMMENT_LIMIT_PER_POST = 1000
+POST_LIMIT_PER_SUBREDDIT = 1000000000000
+COMMENT_LIMIT_PER_POST = 10000000000000
 REQUEST_DELAY = 2  # Задержка между запросами
 
 # Инициализация Reddit API

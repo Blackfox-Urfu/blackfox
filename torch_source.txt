@@ -1,0 +1,150 @@
+Вот подробный гайд, как собрать и добавить кастомные версии PyTorch и TorchVision в проект на **Poetry** (с виртуальным окружением и зависимостями):
+
+---
+
+## 🔧 **1. Подготовка системы**
+
+Убедись, что у тебя установлены:
+
+* `python3.12` или подходящая версия
+* `pip`, `setuptools`, `wheel`
+* `Poetry` (`pip install poetry`)
+* `git`
+* `ninja`, `cmake`, `gcc`, `g++`, `python3.12-dev` и прочее (зависит от дистрибутива)
+* CUDA (если хочешь использовать GPU-сборку)
+
+---
+
+## 🚀 **2. Сборка PyTorch из исходников**
+
+### 📥 Клонирование:
+
+```bash
+git clone --recursive https://github.com/pytorch/pytorch.git
+cd pytorch
+```
+
+Если ты уже клонировал, то обязательно:
+
+```bash
+git submodule sync
+git submodule update --init --recursive
+```
+
+### ⚙️ Настройка окружения:
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+
+pip install --upgrade pip setuptools wheel
+pip install numpy
+```
+
+### 🧱 Сборка и создание `.whl`:
+
+```bash
+python setup.py bdist_wheel
+```
+
+### 📦 Готовый файл:
+
+Он появится в папке:
+
+```bash
+./dist/torch-*.whl
+```
+
+---
+
+## 🧩 **3. Сборка torchvision**
+
+### 📥 Клонирование:
+
+```bash
+cd ..
+git clone https://github.com/pytorch/vision.git
+cd vision
+```
+
+### ⚙️ Окружение и установка зависимостей:
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+
+pip install --upgrade pip setuptools wheel
+pip install numpy
+pip install /path/to/your/torch.whl
+```
+
+### 🧱 Сборка `.whl`:
+
+```bash
+pip install -e .
+```
+
+или если хочешь именно `.whl`:
+
+```bash
+python setup.py bdist_wheel
+```
+
+📦 Готовый файл появится в:
+
+```bash
+./dist/torchvision-*.whl
+```
+
+---
+
+## 📁 **4. Добавление кастомных `.whl` в проект Poetry**
+
+### 💼 В проекте `blackfox`:
+
+```bash
+cd ~/projects/blackfox
+```
+
+### ✍️ Добавление кастомных пакетов:
+
+```bash
+poetry add /absolute/path/to/torch-2.x.x.whl
+poetry add /absolute/path/to/torchvision-0.x.x.whl
+```
+
+> 💡 Лучше указывать **абсолютный путь**, чтобы Poetry не ошибся в URI кодировке (`+` в имени файла и т.п.)
+
+Пример:
+
+```bash
+poetry add /home/pesha/projects/pytorch/dist/torch-2.8.0a0+git670dab6-cp312-cp312-linux_x86_64.whl
+poetry add /home/pesha/projects/vision/dist/torchvision-0.23.0a0+6473b77-cp312-cp312-linux_x86_64.whl
+```
+
+---
+
+## ✅ **5. Проверка**
+
+После установки:
+
+```bash
+poetry run python -c "import torch; print(torch.__version__)"
+poetry run python -c "import torchvision; print(torchvision.__version__)"
+```
+
+---
+
+## 💡 Дополнительно
+
+* Если хочешь использовать `poetry.lock` как фиксатор версий — просто закоммить его в Git.
+* Если проект не должен собираться как библиотека, добавь в `pyproject.toml`:
+
+```toml
+[tool.poetry]
+package-mode = false
+```
+
+---
+
+Если нужно — могу сгенерировать `Makefile` или скрипт, автоматизирующий всё это.

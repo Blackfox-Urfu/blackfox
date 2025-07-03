@@ -5,30 +5,29 @@ description = ""
 authors = [
     {name = "unser229",email = "nzlobin041@gmail.com"}
 ]
-license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
-    "torch (>=2.7.0,<3.0.0)",
-    "torchvision (>=0.22.0,<0.23.0)",
-    "numpy (>=2.2.5,<3.0.0)",
-    "pillow (>=11.2.1,<12.0.0)",
-    "scikit-learn (>=1.6.1,<2.0.0)",
-    "joblib (>=1.5.0,<2.0.0)",
-    "tqdm (>=4.67.1,<5.0.0)",
-    "onnx (>=1.17.0,<2.0.0)",
+    "torch @ file:///home/pesha/projects/pytorch/dist/torch-2.8.0a0+git670dab6-cp312-cp312-linux_x86_64.whl",
+    "scikit-learn (>=1.7.0,<2.0.0)",
+    "joblib (>=1.5.1,<2.0.0)",
+    "optuna (>=4.3.0,<5.0.0)",
+    "numpy (>=2.3.0,<3.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
-    "matplotlib (>=3.10.1,<4.0.0)",
+    "nltk (>=3.9.1,<4.0.0)",
+    "tqdm (>=4.67.1,<5.0.0)",
+    "torchvision @ file:///home/pesha/projects/vision/dist/torchvision-0.23.0a0%2B6473b77-cp312-cp312-linux_x86_64.whl",
+    "onnx (>=1.18.0,<2.0.0)",
     "onnxruntime (>=1.22.0,<2.0.0)",
-    "python-dotenv (>=1.1.0,<2.0.0)",
-    "graphviz (>=0.20.3,<0.21.0)",
-    "torchviz (>=0.0.3,<0.0.4)",
     "fastapi (>=0.115.12,<0.116.0)",
-    "shap (>=0.47.2,<0.48.0)"
+    "uvicorn (>=0.34.3,<0.35.0)",
+    "python-multipart (>=0.0.20,<0.0.21)"
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
 package-mode = false
