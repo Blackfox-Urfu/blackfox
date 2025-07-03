@@ -1,23 +1,30 @@
 import json
 import os
 import glob
+import re
 from datetime import datetime, timezone
 
 # --- Конфигурация путей ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# (Остается без изменений)
+# __file__ может не работать в интерактивных средах, но идеально для скриптов
+try:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    # Запасной вариант для интерактивных сред вроде Jupyter
+    SCRIPT_DIR = os.getcwd()
+
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 
-# ИСХОДНЫЕ ПУТИ
-RAW_AD_TELEGRAM_DIR = os.path.join(PROJECT_ROOT, "data", "raw", "reklama") # Изменено: теперь это директория
+RAW_AD_TELEGRAM_DIR = os.path.join(PROJECT_ROOT, "data", "raw", "reklama")
 RAW_NON_AD_TELEGRAM_INPUT_FILE = os.path.join(PROJECT_ROOT, "data", "raw", "nereklama", "result.json")
 RAW_PIKABU_INPUT_DIR = os.path.join(PROJECT_ROOT, "data", "reddit", "text_posts")
 
-# НОВЫЕ ПУТИ ДЛЯ ОБРАБОТАННЫХ ДАННЫХ (для обучения)
 PROCESSED_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
 PROCESSED_ADS_OUTPUT_FILE = os.path.join(PROCESSED_DATA_DIR, "ads_unified.json")
 PROCESSED_NON_ADS_OUTPUT_FILE = os.path.join(PROCESSED_DATA_DIR, "non_ads_unified.json")
 
-# --- Вспомогательные функции (остаются без изменений из предыдущей версии) ---
+
+# --- Вспомогательные функции ---
 
 def telegram_text_to_string(text_data):
     """Преобразует поле text из формата Telegram в одну строку."""
@@ -57,9 +64,126 @@ def format_timestamp_utc(timestamp_val):
         print(f"Предупреждение: не удалось сконвертировать timestamp: {timestamp_val}")
         return "", ""
 
+# --- НОВЫЕ И ОБНОВЛЕННЫЕ ФУНКЦИИ ---
+
+def count_unicode_emojis(text):
+    """Считает количество стандартных Unicode эмодзи в строке."""
+    # Простой regex для подсчета эмодзи. Может не покрывать абсолютно все, но хорош для начала.
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "]+", flags=re.UNICODE)
+    return len(emoji_pattern.findall(text))
+
+
+def extract_telegram_features(msg, text_content):
+    """Извлекает числовые и булевы признаки из сообщения."""
+    features = {
+        "text_length": len(text_content),
+        "link_count": 0,
+        "mention_count": 0,
+        "hashtag_count": 0,
+        "bot_command_count": 0,
+        "custom_emoji_count": 0,
+        "emoji_count": count_unicode_emojis(text_content),
+        "has_forward": 'forwarded_from' in msg,
+        "has_inline_buttons": bool(msg.get('reply_markup') and msg['reply_markup'].get('rows'))
+    }
+    
+    text_entities = msg.get('text_entities', [])
+    if not text_entities:
+        return features
+        
+    for entity in text_entities:
+        entity_type = entity.get('type')
+        if entity_type in ('url', 'text_link'):
+            features['link_count'] += 1
+        elif entity_type == 'mention':
+            features['mention_count'] += 1
+        elif entity_type == 'hashtag':
+            features['hashtag_count'] += 1
+        elif entity_type == 'bot_command':
+            features['bot_command_count'] += 1
+        elif entity_type == 'custom_emoji':
+            features['custom_emoji_count'] += 1
+            
+    return features
+
+
+def extract_telegram_attachments(msg, base_data_dir):
+    """Извлекает все медиа-вложения из сообщения в новом формате."""
+    attachments = []
+    
+    # Функция-помощник для проверки существования файла
+    def check_file(relative_path):
+        if not relative_path or not isinstance(relative_path, str):
+            return False, ""
+        full_path = os.path.join(base_data_dir, relative_path)
+        return os.path.exists(full_path), full_path
+
+    # 1. Фото
+    if 'photo' in msg and isinstance(msg['photo'], str):
+        is_valid, _ = check_file(msg['photo'])
+        attachments.append({
+            "type": "photo",
+            "path": msg['photo'],
+            "is_valid": is_valid,
+            "width": msg.get('width'),
+            "height": msg.get('height')
+        })
+
+    # 2. Видео, GIF, "Кружочки", Голосовые, Стикеры и др. файлы
+    media_type = msg.get('media_type')
+    # В экспорте Telegram Desktop путь к файлу часто в ключе `file`
+    file_path = msg.get('file') or msg.get('file_name')
+    
+    if not media_type and 'mime_type' in msg:
+        mime = msg['mime_type']
+        if mime.startswith('video/mp4'):
+            media_type = 'video_file'
+        elif mime.startswith('audio/'):
+            media_type = 'voice_message'
+    
+    if media_type and file_path:
+        attachment = {}
+        is_valid, _ = check_file(file_path)
+        
+        type_map = {
+            'video_file': 'video',
+            'animation': 'animation', # GIF
+            'video_message': 'video_message', # Кружочек
+            'voice_message': 'voice_message',
+            'sticker': 'sticker',
+        }
+        attachment['type'] = type_map.get(media_type, 'file') 
+        
+        attachment['path'] = file_path
+        attachment['is_valid'] = is_valid
+        attachment['mime_type'] = msg.get('mime_type')
+        attachment['duration_seconds'] = msg.get('duration_seconds')
+        
+        if attachment['type'] in ['video', 'animation', 'video_message']:
+            attachment['width'] = msg.get('width')
+            attachment['height'] = msg.get('height')
+            attachment['has_thumbnail'] = 'thumbnail_path' in msg or 'thumbnail' in msg
+        
+        if attachment['type'] == 'sticker':
+             attachment['sticker_emoji'] = msg.get('sticker_emoji')
+
+        attachments.append(attachment)
+        
+    return attachments
+
+
 def process_telegram_file(filepath, source_filename_override=None):
-    """Обрабатывает один Telegram JSON файл и возвращает список унифицированных сообщений."""
+    """Обрабатывает один Telegram JSON файл и возвращает список унифицированных сообщений (НОВАЯ ВЕРСИЯ)."""
     unified_messages = []
+    base_data_dir = os.path.dirname(filepath)
     source_base_filename = os.path.basename(filepath) if source_filename_override is None else source_filename_override
 
     if not os.path.exists(filepath):
@@ -82,61 +206,30 @@ def process_telegram_file(filepath, source_filename_override=None):
         return unified_messages
 
     for msg in raw_messages:
-        if not isinstance(msg, dict):
-            print(f"Предупреждение: элемент в 'messages' не является словарем в {filepath}. Пропуск.")
+        if not isinstance(msg, dict) or msg.get('type') == 'service':
             continue
 
         text_content = telegram_text_to_string(msg.get('text'))
-
-        sender_name = msg.get('from')
-        sender_id = msg.get('from_id')
-        if msg.get('type') == 'service' and 'actor' in msg:
-            sender_name = msg.get('actor', sender_name)
-            sender_id = msg.get('actor_id', sender_id)
-
-        date_iso = msg.get('date', "")
-        date_unix_input = msg.get('date_unixtime')
-        date_unix_str = str(date_unix_input) if date_unix_input is not None else ""
-
-
-        if date_unix_str and not date_iso:
-            date_iso, _ = format_timestamp_utc(date_unix_str)
-        elif date_iso and not date_unix_str:
-            try:
-                if date_iso.endswith('Z'):
-                    dt_obj = datetime.fromisoformat(date_iso[:-1] + '+00:00')
-                else:
-                    dt_obj = datetime.fromisoformat(date_iso)
-                if dt_obj.tzinfo is None:
-                    dt_obj = dt_obj.replace(tzinfo=timezone.utc)
-                else:
-                    dt_obj = dt_obj.astimezone(timezone.utc)
-                date_unix_str = str(int(dt_obj.timestamp()))
-            except ValueError as e:
-                print(f"Предупреждение: не удалось сконвертировать ISO дату '{date_iso}' в unixtime: {e}")
-                date_unix_str = ""
+        _, date_unix_str = format_timestamp_utc(msg.get('date_unixtime'))
 
         unified_msg = {
             "id": str(msg.get('id', '')),
-            "type": msg.get('type', 'message') or 'message',
-            "date": date_iso,
+            "type": msg.get('type', 'message'),
             "date_unixtime": date_unix_str,
-            "from": str(sender_name) if sender_name is not None else "",
-            "from_id": str(sender_id) if sender_id is not None else "",
-            "text": text_content,
-            "photo": msg.get('photo', '') or '',
-            "file_name": msg.get('file_name', '') or '',
-            "text_entities": msg.get('text_entities', []) or [],
+            "from_id": str(msg.get('from_id')) if msg.get('from_id') else "",
             "source_file": source_base_filename,
-            "source_type": "telegram"
+            "source_type": "telegram",
+            
+            "text_content": text_content,
+            "text_entities": msg.get('text_entities', []),
+            "features": extract_telegram_features(msg, text_content),
+            "attachments": extract_telegram_attachments(msg, base_data_dir)
         }
-        if not unified_msg["file_name"] and "file" in msg and isinstance(msg["file"], str):
-            if "(File not included" not in msg["file"]:
-                 unified_msg["file_name"] = msg["file"]
         unified_messages.append(unified_msg)
 
     print(f"Обработано {len(unified_messages)} сообщений из {filepath}")
     return unified_messages
+
 
 def process_pikabu_file(filepath):
     """Обрабатывает один Pikabu JSON файл и возвращает список унифицированных сообщений."""
@@ -163,69 +256,35 @@ def process_pikabu_file(filepath):
 
     for post in posts_data:
         if not isinstance(post, dict):
-            print(f"Предупреждение: Элемент в {filepath} не является словарем (постом). Пропуск.")
             continue
 
-        post_iso_date, post_unix_ts = format_timestamp_utc(post.get('created_utc'))
-        post_title = str(post.get('title', '')) if post.get('title') is not None else ''
-        post_body_text = str(post.get('text', '')) if post.get('text') is not None else ''
-        
-        post_text_content = post_title
-        if post_body_text:
-            post_text_content += ("\n" + post_body_text) if post_title else post_body_text
-        post_text_content = post_text_content.strip()
-        
-        photo_url = ''
-        post_url = str(post.get('url', '')) if post.get('url') is not None else ''
-        if not post.get('is_self', False) and post_url:
-            if any(post_url.lower().endswith(ext) for ext in ('.jpeg', '.jpg', '.png', '.gif')):
-                 photo_url = post_url
+        _, post_unix_ts = format_timestamp_utc(post.get('created_utc'))
+        post_title = str(post.get('title', '')).strip()
+        post_body_text = str(post.get('text', '')).strip()
+        text_content = (f"{post_title}\n{post_body_text}" if post_title and post_body_text else post_title + post_body_text).strip()
 
         unified_post_msg = {
             "id": str(post.get('post_id', '')),
             "type": "message",
-            "date": post_iso_date,
             "date_unixtime": post_unix_ts,
-            "from": str(post.get('author', '')) if post.get('author') is not None else '',
             "from_id": str(post.get('author', '')) if post.get('author') is not None else '',
-            "text": post_text_content,
-            "photo": photo_url,
-            "file_name": "",
-            "text_entities": [],
             "source_file": source_base_filename,
-            "source_type": "pikabu_post"
+            "source_type": "pikabu_post",
+            "text_content": text_content,
+            "text_entities": [],
+            "features": { "text_length": len(text_content) }, # Добавим базовые фичи
+            "attachments": []
         }
         unified_messages.append(unified_post_msg)
-
-        comments = post.get('comments', [])
-        if isinstance(comments, list):
-            for comment in comments:
-                if not isinstance(comment, dict):
-                    continue
-                comment_text_content = str(comment.get('text', '')).strip() if comment.get('text') is not None else ''
-                comment_iso_date, comment_unix_ts = format_timestamp_utc(comment.get('created_utc'))
-                unified_comment_msg = {
-                    "id": str(comment.get('id', '')),
-                    "type": "message",
-                    "date": comment_iso_date,
-                    "date_unixtime": comment_unix_ts,
-                    "from": str(comment.get('author', '')) if comment.get('author') is not None else '',
-                    "from_id": str(comment.get('author', '')) if comment.get('author') is not None else '',
-                    "text": comment_text_content,
-                    "photo": "",
-                    "file_name": "",
-                    "text_entities": [],
-                    "source_file": source_base_filename,
-                    "source_type": "pikabu_comment"
-                }
-                unified_messages.append(unified_comment_msg)
-    print(f"Обработано {len(unified_messages)} сообщений (посты+комментарии) из {filepath}")
+        
+    print(f"Обработано {len(unified_messages)} сообщений (только посты) из {filepath}")
     return unified_messages
 
+
+# --- ВОССТАНОВЛЕННАЯ ФУНКЦИЯ ---
 def save_unified_data(messages, output_filepath, dataset_name_prefix="Processed Data"):
     """Сохраняет список унифицированных сообщений в JSON файл."""
     output_dir = os.path.dirname(output_filepath)
-    # Создаем директорию data/processed, если её нет
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"Создана директория для обработанных данных: {output_dir}")
@@ -245,11 +304,11 @@ def save_unified_data(messages, output_filepath, dataset_name_prefix="Processed 
     except Exception as e:
         print(f"Ошибка при сохранении файла {output_filepath}: {e}")
 
+
 # --- Основная логика ---
 if __name__ == "__main__":
     print("Начало процесса слияния и обработки данных...")
 
-    # Создаем директорию data/processed, если её нет (на всякий случай, save_unified_data тоже это делает)
     if not os.path.exists(PROCESSED_DATA_DIR):
         os.makedirs(PROCESSED_DATA_DIR)
         print(f"Создана директория для обработанных данных: {PROCESSED_DATA_DIR}")
@@ -257,49 +316,49 @@ if __name__ == "__main__":
     # 1. Обработка рекламных сообщений
     print(f"\n--- Обработка рекламных сообщений (из {RAW_AD_TELEGRAM_DIR}) ---")
     all_ad_messages = []
-    # Ищем все JSON файлы в указанной директории
     ad_json_files = glob.glob(os.path.join(RAW_AD_TELEGRAM_DIR, "*.json"))
 
     if not ad_json_files:
         print(f"Рекламные JSON файлы не найдены в директории: {RAW_AD_TELEGRAM_DIR}")
     else:
-        print(f"Найдено {len(ad_json_files)} рекламных JSON файлов для обработки в {RAW_AD_TELEGRAM_DIR}:")
+        print(f"Найдено {len(ad_json_files)} рекламных JSON файлов для обработки:")
         for ad_file_path in ad_json_files:
             print(f"  Обработка файла: {ad_file_path}")
+            # Вызываем обновленную функцию для Telegram
             messages_from_file = process_telegram_file(ad_file_path)
             all_ad_messages.extend(messages_from_file)
     
     if all_ad_messages:
         save_unified_data(all_ad_messages, PROCESSED_ADS_OUTPUT_FILE, "Processed Ads Data")
     else:
-        print("Рекламные сообщения не найдены в исходных файлах или не обработаны.")
+        print("Рекламные сообщения не найдены или не обработаны.")
 
     # 2. Обработка нерекламных сообщений
     print("\n--- Обработка нерекламных сообщений ---")
     all_non_ad_messages = []
 
-    # 2а. Нерекламные из Telegram (из data/raw/nereklama)
+    # 2а. Нерекламные из Telegram
     print(f"Обработка нерекламных Telegram сообщений из {RAW_NON_AD_TELEGRAM_INPUT_FILE}...")
+    # Вызываем обновленную функцию для Telegram
     non_ad_telegram_messages = process_telegram_file(RAW_NON_AD_TELEGRAM_INPUT_FILE)
     all_non_ad_messages.extend(non_ad_telegram_messages)
 
-    # 2б. Нерекламные из Pikabu (из data/reddit/text_posts)
+    # 2б. Нерекламные из Pikabu (восстановленная логика)
     print(f"\nОбработка нерекламных Pikabu сообщений из {RAW_PIKABU_INPUT_DIR}...")
     pikabu_files = glob.glob(os.path.join(RAW_PIKABU_INPUT_DIR, "*.json"))
     if not pikabu_files:
         print(f"Исходные файлы Pikabu не найдены в {RAW_PIKABU_INPUT_DIR}")
     else:
         print(f"Найдено {len(pikabu_files)} Pikabu файлов для обработки.")
-    
-    for pikabu_file in pikabu_files:
-        print(f"  Обработка файла: {pikabu_file}")
-        non_ad_pikabu_messages = process_pikabu_file(pikabu_file)
-        all_non_ad_messages.extend(non_ad_pikabu_messages)
+        for pikabu_file in pikabu_files:
+            print(f"  Обработка файла: {pikabu_file}")
+            non_ad_pikabu_messages = process_pikabu_file(pikabu_file)
+            all_non_ad_messages.extend(non_ad_pikabu_messages)
     
     if all_non_ad_messages:
         save_unified_data(all_non_ad_messages, PROCESSED_NON_ADS_OUTPUT_FILE, "Processed Non-Ads Data")
     else:
-        print("Нерекламные сообщения не найдены в исходных файлах или не обработаны.")
+        print("Нерекламные сообщения не найдены или не обработаны.")
 
     print("\nПроцесс слияния и обработки данных завершен.")
     print(f"Обработанные рекламные данные сохранены в: {PROCESSED_ADS_OUTPUT_FILE}")

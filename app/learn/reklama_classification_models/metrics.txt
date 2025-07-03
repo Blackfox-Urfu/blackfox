@@ -1,0 +1,31 @@
+--- Final Evaluation on Test Set ---
+Test Loss: 0.4645 | Test F1-score (weighted): 0.8607
+
+Classification Report (Test Set):
+{
+  "0": {
+    "precision": 0.9104843654199878,
+    "recall": 0.8576378862258157,
+    "f1-score": 0.883271375464684,
+    "support": 3463.0
+  },
+  "1": {
+    "precision": 0.788412017167382,
+    "recall": 0.8628464067637388,
+    "f1-score": 0.8239515586454362,
+    "support": 2129.0
+  },
+  "accuracy": 0.859620886981402,
+  "macro avg": {
+    "precision": 0.8494481912936849,
+    "recall": 0.8602421464947773,
+    "f1-score": 0.8536114670550601,
+    "support": 5592.0
+  },
+  "weighted avg": {
+    "precision": 0.8640086806149453,
+    "recall": 0.859620886981402,
+    "f1-score": 0.8606869888394733,
+    "support": 5592.0
+  }
+}
