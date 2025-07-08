@@ -1,131 +1,89 @@
-// Основной обработчик сообщений от content.js
+const LOGS = [];
+const MAX_LOG_ENTRIES = 1000;
+
+function log(level, ...args) {
+    const now = new Date().toISOString();
+    const message = args.map(arg => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' ');
+    const logEntry = `${now} [${level.toUpperCase()}] ${message}`;
+    LOGS.push(logEntry);
+    if (LOGS.length > MAX_LOG_ENTRIES) LOGS.splice(0, LOGS.length - MAX_LOG_ENTRIES);
+    console.log(logEntry);
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "classifyMessage") {
-        // Новый обработчик для комплексного анализа сообщений (текст + опционально картинка)
-        handleMessageClassification(request, sendResponse);
-        return true; // Указываем, что ответ будет асинхронным
-    } else if (request.action === "classifyImageNsfw") {
-        // Старый обработчик, теперь только для NSFW
-        handleNsfwClassification(request, sendResponse);
-        return true; // Указываем, что ответ будет асинхронным
+    log('INFO', `Action: ${request.action} from tab ${sender.tab?.id || 'popup'}`);
+    switch (request.action) {
+        case "classifyMessage":
+            if (request.mode === 'text_only') {
+                handleTextOnlyClassification(request, sendResponse);
+            } else {
+                handleMessageClassification(request, sendResponse);
+            }
+            return true;
+        case "classifyImageNsfw":
+            handleNsfwClassification(request, sendResponse);
+            return true;
+        case "getLogs":
+            sendResponse({ logs: LOGS });
+            return false;
+        case "logFromContent":
+            log(request.level || 'INFO', `CONTENT (Tab ${sender.tab?.id}):`, ...request.args);
+            return false;
+        default:
+            log('WARN', `Unknown action: ${request.action}`);
+            return false;
     }
 });
 
-// НОВАЯ ФУНКЦИЯ: Обработка сообщений на рекламу (текст + картинка)
 async function handleMessageClassification(request, sendResponse) {
+    log('INFO', `Classifying multimodal. Text: "${(request.text || '').substring(0, 40)}...", Image: ${!!request.imageSrc}`);
     try {
         const formData = new FormData();
-        // Всегда добавляем текст, даже если он пустой
         formData.append('text', request.text || '');
-
-        // Если есть картинка, получаем её blob и добавляем в форму
         if (request.imageSrc) {
             const blob = await fetchBlob(request.imageSrc);
-            if (blob) {
-                // Имя файла не критично, но лучше его задать
-                formData.append('image', blob, generateFileName(request.imageSrc, blob.type));
-            }
+            if (blob) formData.append('image', blob, `image.${blob.type.split('/')[1] || 'png'}`);
         }
-
-        // Отправляем запрос на новый, мультимодальный эндпоинт
-        const response = await fetch("http://localhost:8000/api/classify_message/", {
-            method: "POST",
-            body: formData, // Отправляем FormData, Content-Type установится автоматически
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP error ${response.status}: ${errorText}`);
-        }
-
+        const response = await fetch("http://localhost:8000/api/classify_message/", { method: "POST", body: formData });
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         const result = await response.json();
+        log('SUCCESS', `Multimodal result: prob=${result.prediction_prob_ad?.toFixed(4)}`);
         sendResponse(result);
-
-    } catch (error) {
-        console.error("BG: Ошибка при обработке сообщения:", error);
-        sendResponse({
-            is_ad: false,
-            prediction_prob_ad: 0,
-            error: error.message || "Unknown error processing message"
-        });
-    }
+    } catch (error) { log('ERROR', 'Multimodal classification failed:', error.message); sendResponse({ error: error.message }); }
 }
 
-
-// ОБНОВЛЕННАЯ ФУНКЦИЯ: Обработка картинок ТОЛЬКО на NSFW
-async function handleNsfwClassification(request, sendResponse) {
-    if (!request.imageData) {
-        sendResponse({ is_nsfw: false, error: "Missing imageData" });
-        return;
-    }
-
+async function handleTextOnlyClassification(request, sendResponse) {
+    log('INFO', `Classifying text-only. Text: "${(request.text || '').substring(0, 40)}..."`);
     try {
-        const blob = await (request.imageData.type === 'url'
-            ? fetchBlob(request.imageData.url)
-            : Promise.resolve(new Blob([new Uint8Array(request.imageData.buffer)], { type: request.imageData.mimeType }))
-        );
-
-        if (!blob) {
-            throw new Error("Failed to obtain blob for NSFW classification.");
-        }
-
-        const formData = new FormData();
-        const fileName = request.imageData.fileName || generateFileName(request.imageData.url, blob.type);
-        formData.append('file', blob, fileName);
-
-        // Отправляем запрос на эндпоинт, который специально для NSFW
-        const response = await fetch("http://localhost:8000/api/classify_nsfw_image/", {
-            method: "POST",
-            body: formData,
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP error ${response.status}: ${errorText}`);
-        }
-
+        if (!request.text) throw new Error("Text is required");
+        const response = await fetch("http://localhost:8000/api/classify_text/", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: request.text }) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         const result = await response.json();
+        log('SUCCESS', `Text-only result: prob=${result.prediction_prob_ad?.toFixed(4)}`);
         sendResponse(result);
-
-    } catch (error) {
-        console.error("BG: Ошибка при обработке NSFW:", error, "Исходные данные:", request.imageData);
-        sendResponse({
-            is_nsfw: false,
-            prediction_prob_nsfw: 0,
-            error: error.message || "Unknown error processing NSFW"
-        });
-    }
+    } catch (error) { log('ERROR', 'Text-only classification failed:', error.message); sendResponse({ error: error.message }); }
 }
 
+async function handleNsfwClassification(request, sendResponse) {
+    log('INFO', `Classifying NSFW. Type: ${request.imageData?.type}`);
+    try {
+        if (!request.imageData) throw new Error("Missing imageData");
+        const blob = request.imageData.type === 'url' ? await fetchBlob(request.imageData.url) : new Blob([new Uint8Array(request.imageData.buffer)], { type: request.imageData.mimeType });
+        if (!blob) throw new Error("Failed to get blob");
+        const formData = new FormData();
+        formData.append('file', blob, `image.${blob.type.split('/')[1] || 'png'}`);
+        const response = await fetch("http://localhost:8000/api/classify_nsfw_image/", { method: "POST", body: formData });
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        const result = await response.json();
+        log('SUCCESS', `NSFW result: prob=${result.prediction_prob_nsfw?.toFixed(4)}`);
+        sendResponse(result);
+    } catch (error) { log('ERROR', 'NSFW classification failed:', error.message); sendResponse({ error: error.message }); }
+}
 
-// Вспомогательные функции (без изменений)
 async function fetchBlob(url) {
     try {
         const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP status ${response.status} for URL: ${url}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return await response.blob();
-    } catch (error) {
-        console.error("BG: Ошибка получения Blob для URL:", url, error);
-        return null;
-    }
-}
-
-function generateFileName(url, mimeType = 'image/png') {
-    let extension = 'png';
-    if (mimeType && mimeType.startsWith('image/')) {
-        const parts = mimeType.split('/');
-        if (parts.length > 1 && ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(parts[1].toLowerCase())) {
-            extension = parts[1].toLowerCase();
-        }
-    }
-    if (url && !url.startsWith('blob:')) {
-        try {
-            const urlObj = new URL(url);
-            const extPart = urlObj.pathname.split('.').pop().toLowerCase();
-            if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extPart)) {
-                extension = extPart;
-            }
-        } catch {}
-    }
-    return `image.${extension}`;
+    } catch (error) { log('ERROR', `Fetch blob failed for URL: ${url}`, error); return null; }
 }
