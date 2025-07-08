@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Настройки расширения</title>
+    <title>Настройки Black-Fox</title>
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -12,65 +12,66 @@
             <h1>Настройки</h1>
             
             <div class="settings-section fade-in">
-                <h2>Способ отображения рекламы</h2>
+                <h2>Общие настройки</h2>
+                <div class="setting-item">
+                    <input type="checkbox" id="enableAdClassification" name="enableAdClassification">
+                    <label for="enableAdClassification" class="checkbox-label">Включить анализ на рекламу/спам</label>
+                </div>
+                <div class="setting-item">
+                    <input type="checkbox" id="enableNsfwClassification" name="enableNsfwClassification">
+                    <label for="enableNsfwClassification" class="checkbox-label">Включить анализ изображений на NSFW</label>
+                </div>
+            </div>
+
+            <div class="settings-section fade-in" id="adSettingsContainer">
+                <h2>Настройки отображения рекламы</h2>
                 <select id="displayMode">
                     <option value="highlight">Пометка красным</option>
                     <option value="hide">Полное скрытие</option>
                     <option value="partial">Полупрозрачное отображение</option>
-                    <option value="prediction">Только предсказание</option>
+                    <option value="prediction">Только метка с вероятностью</option>
                 </select>
-            </div>
-
-            <div class="settings-section fade-in">
-                <h2>Порог определения рекламы</h2>
+                <h2 style="margin-top: 15px;">Порог определения рекламы</h2>
                 <div class="threshold-container">
                     <input type="range" id="thresholdSlider" min="0" max="100" value="50">
                     <input type="number" id="thresholdInput" min="0" max="1" step="0.01" value="0.50">
                 </div>
             </div>
 
-            <!-- НОВАЯ СЕКЦИЯ ДЛЯ НАСТРОЕК КЛАССИФИКАЦИИ АВАТАРОК -->
-            <div class="settings-section fade-in" id="avatarSettingsSectionContainer">
-                <h2>Классификация аватарок</h2>
+            <div class="settings-section fade-in" id="nsfwSettingsContainer">
+                <h2>Настройки отображения NSFW</h2>
                 <div class="setting-item">
-                    <input type="checkbox" id="classifyAvatarsEnabled" name="classifyAvatarsEnabled">
-                    <label for="classifyAvatarsEnabled" class="checkbox-label">Включить классификацию аватарок (NSFW)</label>
-                </div>
-                <div class="setting-item" id="nsfwModeSettingItem" style="margin-top: 15px;">
-                    <label for="nsfwAvatarDisplayMode">Режим отображения NSFW аватарок:</label>
+                    <label for="nsfwAvatarDisplayMode">Режим отображения NSFW контента:</label>
                     <select id="nsfwAvatarDisplayMode" style="margin-top: 5px;">
                         <option value="blur">Размытие</option>
                         <option value="hide">Скрыть</option>
                         <option value="border">Красная рамка</option>
-                        <option value="nothing">Ничего не делать (только метка)</option>
+                        <option value="nothing">Ничего не делать</option>
                     </select>
                 </div>
             </div>
-            <!-- КОНЕЦ НОВОЙ СЕКЦИИ -->
 
             <div class="settings-section fade-in">
                 <h2>Управление данными</h2>
                 <div class="import-export-container">
-                    <button id="exportBtn" class="action-btn">Экспортировать список каналов</button>
-                    <button id="importBtn" class="action-btn">Импортировать список каналов</button>
+                    <button id="exportBtn" class="action-btn">Экспортировать исключения</button>
+                    <button id="importBtn" class="action-btn">Импортировать исключения</button>
                     <input type="file" id="importFile" accept=".json" style="display: none;">
+                    <button id="downloadLogsBtn" class="action-btn" style="margin-top: 10px; background-color: #7f8c8d;">Скачать логи расширения</button>
                 </div>
             </div>
         </div>
 
         <!-- Правая колонка со списком каналов -->
         <div class="right-column">
-            <h1>Каналы</h1>
-            
+            <h1>Исключения (Каналы)</h1>
             <div class="channel-search">
-                <input type="text" id="channelSearch" placeholder="Поиск по вашим каналам...">
+                <input type="text" id="channelSearch" placeholder="Поиск по исключенным каналам...">
             </div>
-
             <div class="channel-list-container">
                 <ul id="channelList"></ul>
             </div>
-
-            <button id="addButton" class="add-channel-btn fade-in">Добавить новый канал</button>
+            <button id="addButton" class="add-channel-btn fade-in">Добавить канал в исключения</button>
         </div>
     </div>
     <script src="popup.js" defer></script>

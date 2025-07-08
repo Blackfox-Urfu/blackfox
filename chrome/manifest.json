@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Telegram Content Filter & NSFW Avatar Classifier",
-  "version": "1.2.0",
-  "description": "Filters ads and classifies user avatars (NSFW/SFW) in Telegram Web.",
+  "name": "Black-Fox: Telegram Content Analyzer",
+  "version": "2.0.0",
+  "description": "Analyzes messages for ads/spam and classifies images for NSFW content in Telegram Web.",
   "options_page": "popup.html",
   "permissions": [
     "storage",
@@ -10,7 +10,7 @@
   ],
   "host_permissions": [
     "https://web.telegram.org/*",
-    "http://localhost:8000/"   
+    "http://localhost:8000/"
   ],
   "background": {
     "service_worker": "background.js"
@@ -29,7 +29,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "TG Filter Settings"
+    "default_title": "Black-Fox Settings"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';"
