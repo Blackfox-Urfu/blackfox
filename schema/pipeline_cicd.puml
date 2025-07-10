@@ -1,0 +1,97 @@
+@startuml
+title Диаграмма последовательности: Автоматизированный MLOps Pipeline
+
+actor "Разработчик" as Dev
+participant "pipeline.sh (Локальный скрипт)" as PipelineScript
+participant "Python Scripts (learn/)" as LearnScripts
+database "Файловая система (data/, models/)" as FileSystem
+participant "Локальный Docker Engine" as LocalDocker
+participant "Удаленный сервер (через SSH)" as RemoteServerSSH
+participant "Удаленный Docker Engine" as RemoteDocker
+participant "Запущенный контейнер" as Container
+
+autonumber "<b>[P0]"
+
+' === Фаза 1: Инициация и Обучение === '
+Dev -> PipelineScript: Запускает ./pipeline.sh
+activate PipelineScript
+
+PipelineScript -> LearnScripts: Запуск скриптов обучения моделей
+activate LearnScripts
+LearnScripts -> FileSystem: Чтение данных из ./data
+activate FileSystem
+FileSystem --> LearnScripts: Данные для обучения
+deactivate FileSystem
+
+LearnScripts -> LearnScripts: Процесс обучения (циклы, эпохи)
+
+LearnScripts -> FileSystem: Сохранение артефактов моделей в ./models
+activate FileSystem
+FileSystem --> LearnScripts: Подтверждение сохранения
+deactivate FileSystem
+
+LearnScripts --> PipelineScript: Обучение завершено
+deactivate LearnScripts
+
+' === Фаза 2: Сборка Docker-образа === '
+PipelineScript -> LocalDocker: Выполнение команды `docker build -t ... .`
+activate LocalDocker
+note right of LocalDocker
+  Внутри этого шага Docker:
+  - Читает `Dockerfile`
+  - Копирует `server_run/`
+  - Копирует `models/`
+  - Устанавливает `requirements.txt`
+end note
+LocalDocker --> PipelineScript: Docker-образ успешно собран
+deactivate LocalDocker
+
+' === Фаза 3: Деплой образа на сервер === '
+PipelineScript -> LocalDocker: Выполнение `docker save ...`
+activate LocalDocker
+LocalDocker -> RemoteServerSSH: Передача образа (stream) по SSH-туннелю
+deactivate LocalDocker
+activate RemoteServerSSH
+
+RemoteServerSSH -> RemoteDocker: Выполнение `... | docker load`
+activate RemoteDocker
+note right of RemoteDocker
+  Образ загружается в удаленный
+  Docker из потока данных (stdin)
+end note
+RemoteDocker --> RemoteServerSSH: Образ успешно загружен
+deactivate RemoteDocker
+RemoteServerSSH --> PipelineScript: Подтверждение загрузки образа
+deactivate RemoteServerSSH
+
+' === Фаза 4: Перезапуск сервиса на сервере === '
+PipelineScript -> RemoteServerSSH: Отправка удаленных команд (stop, rm, run)
+activate RemoteServerSSH
+
+opt Старый контейнер существует
+    RemoteServerSSH -> RemoteDocker: `docker stop blackfox-container`
+    activate RemoteDocker
+    RemoteDocker --> RemoteServerSSH: Контейнер остановлен
+    deactivate RemoteDocker
+
+    RemoteServerSSH -> RemoteDocker: `docker rm blackfox-container`
+    activate RemoteDocker
+    RemoteDocker --> RemoteServerSSH: Контейнер удален
+    deactivate RemoteDocker
+end
+
+RemoteServerSSH -> RemoteDocker: `docker run -d --name ... blackfox-app`
+activate RemoteDocker
+RemoteDocker -> Container: Создание и запуск нового контейнера
+activate Container
+Container -> Container: Запуск FastAPI / Uvicorn сервиса
+Container -> Container: Загрузка моделей из ./models в память
+RemoteDocker --> RemoteServerSSH: Контейнер запущен, возврат ID
+deactivate RemoteDocker
+RemoteServerSSH --> PipelineScript: Деплой завершен
+deactivate RemoteServerSSH
+
+PipelineScript -> Dev: Вывод в консоль: "ДЕПЛОЙ ЗАВЕРШЕН!"
+deactivate PipelineScript
+
+@enduml

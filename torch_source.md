@@ -14,12 +14,6 @@
 * CUDA (если хочешь использовать GPU-сборку)
 
 ---
-
-## 🚀 **2. Сборка PyTorch из исходников**
-
-### 📥 Клонирование:
-
-```bash
 git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 ```
@@ -33,10 +27,13 @@ git submodule update --init --recursive
 
 ### ⚙️ Настройка окружения:
 
+если 3.12 нет , то придется установить с помощью pyenv , использовать python вместо python3.12
+
 ```bash
 python3.12 -m venv venv
 source venv/bin/activate
 
+pip install -r requirements.txt  
 pip install --upgrade pip setuptools wheel
 pip install numpy
 ```

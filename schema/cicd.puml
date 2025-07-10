@@ -1,0 +1,67 @@
+@startuml
+skinparam componentStyle uml2
+skinparam nodesep 35
+skinparam ranksep 40
+left to right direction
+
+' Акторы и основные зоны '
+actor "Разработчик" as Dev
+
+rectangle "Локальная машина (Developer PC)" as Local {
+    package "Исходный код проекта" {
+        [learn/ (скрипты обучения)] as LearnScripts
+        [server_run/ (код сервера)] as ServerCode
+        [Dockerfile] as Dockerfile
+        [requirements.txt] as Req
+        [config.sh] as Config
+    }
+
+    [pipeline.sh\n(Главный скрипт)] as PipelineScript
+
+    package "Артефакты процесса" {
+      folder "data/ (исходные данные)" as LocalData
+      folder "models/ (обученные модели)" as LocalModels
+      [Docker-образ\n(blackfox-app:latest)] as DockerImage
+    }
+    
+    [Локальный Docker Engine] as LocalDocker
+}
+
+rectangle "Удаленный сервер (Production)" as Remote {
+    [Удаленный Docker Engine] as RemoteDocker
+
+    rectangle "Запущенный контейнер [blackfox-container]" as RunningContainer {
+        [FastAPI App (main.py)] as App
+        folder "models/ (внутри контейнера)" as DeployedModels
+    }
+}
+
+
+' === Последовательность действий Pipeline === '
+
+Dev -> PipelineScript : "1. Запуск\n./pipeline.sh"
+
+' Фаза 1: Обучение '
+PipelineScript --> LearnScripts : "2. Вызов скриптов обучения"
+LearnScripts ..> LocalData : "2a. Чтение данных"
+LearnScripts --> LocalModels : "2b. Сохранение обученных моделей"
+
+' Фаза 2: Сборка '
+PipelineScript --> LocalDocker : "3. Команда\ndocker build"
+LocalDocker ..> Dockerfile : "3a. Чтение инструкций"
+LocalDocker ..> ServerCode : "3b. Копирование кода"
+LocalDocker ..> LocalModels : "3c. Копирование моделей"
+LocalDocker ..> Req : "3d. Установка зависимостей"
+LocalDocker --> DockerImage : "4. Создание локального образа"
+
+' Фаза 3: Деплой и запуск '
+PipelineScript --> LocalDocker : "5. Команда\ndocker save"
+LocalDocker --> RemoteDocker : "6. Передача образа по SSH\n(docker save | ssh ... docker load)"
+PipelineScript --> RemoteDocker : "7. Удаленная команда\ndocker run (через SSH)"
+RemoteDocker --> RunningContainer : "8. (Пере)запуск контейнера из нового образа"
+
+' Внутренняя логика запущенного контейнера '
+RunningContainer ..> App : "9. Запуск FastAPI приложения"
+App ..> DeployedModels : "10. Загрузка моделей в память"
+
+@enduml
