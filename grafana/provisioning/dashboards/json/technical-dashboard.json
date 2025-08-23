@@ -1,0 +1,90 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 10,
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "type": "stat",
+      "title": "Общая частота запросов",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_requests_total{job=\"fastapi-app\"}[5m]))" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 80 }] }, "mappings": [], "color": { "mode": "thresholds" }, "unit": "reqps" } }
+    },
+    {
+      "id": 12,
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "type": "stat",
+      "title": "Частота ошибок (5xx)",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_requests_total{job=\"fastapi-app\", code=~\"5..\"}[5m]))" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.1 }] }, "mappings": [], "color": { "mode": "thresholds" }, "unit": "ops" } }
+    },
+    {
+      "id": 14,
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
+      "type": "stat",
+      "title": "Всего предсказаний (за период)",
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(predictions_total{job=\"fastapi-app\"}[$__range]))" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }, "mappings": [], "color": { "mode": "thresholds" } } }
+    },
+    {
+      "id": 2,
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+      "type": "timeseries",
+      "title": "Задержка предсказаний (Latency)",
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.99, sum(rate(prediction_latency_seconds_bucket[5m])) by (le, model_type))", "legendFormat": "p99 - {{model_type}}" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(prediction_latency_seconds_bucket[5m])) by (le, model_type))", "legendFormat": "p95 - {{model_type}}" },
+        { "refId": "C", "expr": "histogram_quantile(0.50, sum(rate(prediction_latency_seconds_bucket[5m])) by (le, model_type))", "legendFormat": "p50 - {{model_type}}" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5 }, "unit": "s" } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } }
+    },
+    {
+      "id": 4,
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+      "type": "piechart",
+      "title": "Распределение результатов предсказаний",
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(predictions_total[1h])) by (model_type, result)", "legendFormat": "{{model_type}} - {{result}}" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "pieType": "pie", "displayLabels": ["name", "percent"], "legend": { "displayMode": "list", "placement": "right" } }
+    },
+    {
+      "id": 16,
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 13 },
+      "type": "timeseries",
+      "title": "Частота предсказаний по моделям",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(predictions_total[5m])) by (model_type)", "legendFormat": "{{model_type}}" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 25, "gradientMode": "opacity", "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "stacking": { "mode": "normal" } }, "unit": "ops" } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["technical"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "FastAPI Technical Dashboard",
+  "uid": "fastapi-technical-dashboard-auto",
+  "version": 1
+}

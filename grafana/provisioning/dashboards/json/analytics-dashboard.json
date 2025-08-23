@@ -1,0 +1,123 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "type": "row",
+      "title": "Ключевые показатели (KPI)"
+    },
+    {
+      "id": 2,
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 2 },
+      "type": "stat",
+      "title": "Всего предсказаний",
+      "targets": [
+        { "expr": "sum(increase(predictions_total{job=\"fastapi-app\"}[$__range]))", "refId": "A" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } }
+    },
+    {
+      "id": 3,
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 2 },
+      "type": "gauge",
+      "title": "Общее соотношение Рекламы",
+      "targets": [
+        { "expr": "sum(increase(predictions_total{job=\"fastapi-app\", result=\"ad\"}[$__range])) / sum(increase(predictions_total{job=\"fastapi-app\", model_type=~\"multimodal|text_only\"}[$__range]))", "refId": "A", "legendFormat": "Реклама" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.2 }, { "color": "red", "value": 0.4 }] } } }
+    },
+    {
+      "id": 4,
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 2 },
+      "type": "gauge",
+      "title": "Общее соотношение NSFW",
+      "targets": [
+        { "expr": "sum(increase(predictions_total{job=\"fastapi-app\", result=\"nsfw\"}[$__range])) / sum(increase(predictions_total{job=\"fastapi-app\", model_type=\"nsfw\"}[$__range]))", "refId": "A", "legendFormat": "NSFW" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 0.25 }] } } }
+    },
+    {
+      "id": 5,
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 2 },
+      "type": "stat",
+      "title": "Средняя задержка (p95)",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(prediction_latency_seconds_bucket{job=\"fastapi-app\"}[5m])) by (le))", "refId": "A" }
+      ],
+      "options": { "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 1 }] } } }
+    },
+    {
+      "id": 6,
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 9 },
+      "type": "row",
+      "title": "Анализ Рекламного Контента"
+    },
+    {
+      "id": 7,
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 11 },
+      "type": "timeseries",
+      "title": "Частота предсказаний (Реклама)",
+      "targets": [
+        { "expr": "sum(rate(predictions_total{job=\"fastapi-app\", model_type=~\"multimodal|text_only\"}[5m])) by (result)", "refId": "A", "legendFormat": "{{result}}" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "opacity", "stacking": { "mode": "normal" } }, "unit": "reqps" } }
+    },
+    {
+      "id": 8,
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 11 },
+      "type": "piechart",
+      "title": "Соотношение Реклама / Не реклама",
+      "targets": [
+        { "expr": "sum(increase(predictions_total{job=\"fastapi-app\", model_type=~\"multimodal|text_only\"}[$__range])) by (result)", "refId": "A", "legendFormat": "{{result}}" }
+      ],
+      "options": { "pieType": "pie", "displayLabels": ["name", "percent"], "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 9,
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 20 },
+      "type": "row",
+      "title": "Анализ NSFW Контента"
+    },
+    {
+      "id": 10,
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 22 },
+      "type": "timeseries",
+      "title": "Частота предсказаний (NSFW)",
+      "targets": [
+        { "expr": "sum(rate(predictions_total{job=\"fastapi-app\", model_type=\"nsfw\"}[5m])) by (result)", "refId": "A", "legendFormat": "{{result}}" }
+      ],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "opacity", "stacking": { "mode": "normal" } }, "unit": "reqps" } }
+    },
+    {
+      "id": 11,
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 22 },
+      "type": "piechart",
+      "title": "Соотношение NSFW / SFW",
+      "targets": [
+        { "expr": "sum(increase(predictions_total{job=\"fastapi-app\", model_type=\"nsfw\"}[$__range])) by (result)", "refId": "A", "legendFormat": "{{result}}" }
+      ],
+      "options": { "pieType": "pie", "displayLabels": ["name", "percent"], "legend": { "displayMode": "list", "placement": "bottom" } }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 36,
+  "style": "dark",
+  "tags": ["analytics"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "BlackFox Analytics Dashboard",
+  "uid": "blackfox-analytics-dashboard-auto",
+  "version": 1
+}

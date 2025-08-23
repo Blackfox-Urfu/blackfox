@@ -1,0 +1,19 @@
+# /root/blackfox/grafana/provisioning/dashboards/dashboards.yml
+
+apiVersion: 1
+
+providers:
+  # Имя провайдера, может быть любым
+  - name: 'default-dashboards'
+    orgId: 1
+    # Папка внутри Grafana, куда положить дашборды. '' означает "в корень (General)"
+    folder: ''
+    # Тип провайдера
+    type: file
+    # Запретить удаление дашбордов из UI, если они настроены через provisioning
+    disableDeletion: false
+    # Разрешить редактирование
+    editable: true
+    # Самая важная строка: путь ВНУТРИ КОНТЕЙНЕРА, где лежат JSON-файлы
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
