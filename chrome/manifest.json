@@ -10,7 +10,7 @@
   ],
   "host_permissions": [
     "https://web.telegram.org/*",
-    "http://localhost:8000/"
+    "https://blackfoxus.ru:8443/"
   ],
   "background": {
     "service_worker": "background.js"

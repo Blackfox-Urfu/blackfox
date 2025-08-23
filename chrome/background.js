@@ -1,3 +1,6 @@
+// --- НОВОЕ: Выносим базовый URL в константу ---
+const BASE_URL = "https://blackfoxus.ru:8443"; 
+
 const LOGS = [];
 const MAX_LOG_ENTRIES = 1000;
 
@@ -44,7 +47,8 @@ async function handleMessageClassification(request, sendResponse) {
             const blob = await fetchBlob(request.imageSrc);
             if (blob) formData.append('image', blob, `image.${blob.type.split('/')[1] || 'png'}`);
         }
-        const response = await fetch("http://localhost:8000/api/classify_message/", { method: "POST", body: formData });
+        // --- ИЗМЕНЕНО: Используем константу BASE_URL ---
+        const response = await fetch(`${BASE_URL}/api/classify_message/`, { method: "POST", body: formData });
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         const result = await response.json();
         log('SUCCESS', `Multimodal result: prob=${result.prediction_prob_ad?.toFixed(4)}`);
@@ -56,7 +60,8 @@ async function handleTextOnlyClassification(request, sendResponse) {
     log('INFO', `Classifying text-only. Text: "${(request.text || '').substring(0, 40)}..."`);
     try {
         if (!request.text) throw new Error("Text is required");
-        const response = await fetch("http://localhost:8000/api/classify_text/", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: request.text }) });
+        // --- ИЗМЕНЕНО: Используем константу BASE_URL ---
+        const response = await fetch(`${BASE_URL}/api/classify_text/`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: request.text }) });
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         const result = await response.json();
         log('SUCCESS', `Text-only result: prob=${result.prediction_prob_ad?.toFixed(4)}`);
@@ -72,7 +77,8 @@ async function handleNsfwClassification(request, sendResponse) {
         if (!blob) throw new Error("Failed to get blob");
         const formData = new FormData();
         formData.append('file', blob, `image.${blob.type.split('/')[1] || 'png'}`);
-        const response = await fetch("http://localhost:8000/api/classify_nsfw_image/", { method: "POST", body: formData });
+        // --- ИЗМЕНЕНО: Используем константу BASE_URL ---
+        const response = await fetch(`${BASE_URL}/api/classify_nsfw_image/`, { method: "POST", body: formData });
         if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         const result = await response.json();
         log('SUCCESS', `NSFW result: prob=${result.prediction_prob_nsfw?.toFixed(4)}`);
