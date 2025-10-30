@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Black-Fox ML Classification</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.8;
+            font-size: 1.1em;
+        }
+
+        .tabs {
+            display: flex;
+            background: #34495e;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .tab {
+            padding: 15px 30px;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .tab.active {
+            background: rgba(255,255,255,0.2);
+            border-bottom-color: #3498db;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        textarea, input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        textarea:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .file-upload {
+            border: 2px dashed #e0e0e0;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+        }
+
+        .file-upload:hover {
+            border-color: #3498db;
+        }
+
+        .file-upload.dragover {
+            border-color: #3498db;
+            background: rgba(52, 152, 219, 0.05);
+        }
+
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+        }
+
+        .result.ad {
+            border-left-color: #e74c3c;
+            background: #fdf2f2;
+        }
+
+        .result.not-ad {
+            border-left-color: #27ae60;
+            background: #f2fdf2;
+        }
+
+        .result.nsfw {
+            border-left-color: #e67e22;
+            background: #fef9f2;
+        }
+
+        .probability-bar {
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .probability-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2980b9);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+
+        .probability-fill.ad {
+            background: linear-gradient(90deg, #e74c3c, #c0392b);
+        }
+
+        .probability-fill.nsfw {
+            background: linear-gradient(90deg, #e67e22, #d35400);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-online {
+            background: #27ae60;
+        }
+
+        .status-offline {
+            background: #e74c3c;
+        }
+
+        .health-status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .model-status {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .tabs {
+                flex-direction: column;
+            }
+            
+            .tab {
+                padding: 12px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Black-Fox ML Classification</h1>
+            <p>Определение рекламного контента и NSFW изображений</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('multimodal')">Мультимодальный анализ</button>
+            <button class="tab" onclick="switchTab('text-only')">Только текст</button>
+            <button class="tab" onclick="switchTab('nsfw')">NSFW изображения</button>
+            <button class="tab" onclick="switchTab('status')">Статус системы</button>
+        </div>
+
+        <!-- Мультимодальный анализ -->
+        <div id="multimodal" class="tab-content active">
+            <h2>Мультимодальный анализ контента</h2>
+            <p>Анализ текста и изображения для определения рекламного контента</p>
+            
+            <div class="form-group">
+                <label for="multimodal-text">Текст сообщения:</label>
+                <textarea id="multimodal-text" placeholder="Введите текст для анализа..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Изображение (опционально):</label>
+                <div class="file-upload" id="multimodal-upload">
+                    <p>Перетащите изображение сюда или кликните для выбора</p>
+                    <input type="file" id="multimodal-image" accept="image/*" style="display: none;">
+                    <div id="multimodal-preview" style="margin-top: 10px;"></div>
+                </div>
+            </div>
+
+            <button class="btn" onclick="analyzeMultimodal()">Анализировать</button>
+
+            <div class="loading" id="multimodal-loading">
+                <div class="spinner"></div>
+                <p>Анализируем контент...</p>
+            </div>
+
+            <div class="result" id="multimodal-result" style="display: none;"></div>
+        </div>
+
+        <!-- Только текст -->
+        <div id="text-only" class="tab-content">
+            <h2>Анализ текста</h2>
+            <p>Определение рекламного контента по тексту</p>
+            
+            <div class="form-group">
+                <label for="text-only-input">Текст для анализа:</label>
+                <textarea id="text-only-input" placeholder="Введите текст для анализа..."></textarea>
+            </div>
+
+            <button class="btn" onclick="analyzeTextOnly()">Анализировать текст</button>
+
+            <div class="loading" id="text-loading">
+                <div class="spinner"></div>
+                <p>Анализируем текст...</p>
+            </div>
+
+            <div class="result" id="text-result" style="display: none;"></div>
+        </div>
+
+        <!-- NSFW анализ -->
+        <div id="nsfw" class="tab-content">
+            <h2>NSFW анализ изображений</h2>
+            <p>Определение неприемлемого контента (Not Safe For Work) на изображениях</p>
+            
+            <div class="form-group">
+                <label>Изображение для анализа:</label>
+                <div class="file-upload" id="nsfw-upload">
+                    <p>Перетащите изображение сюда или кликните для выбора</p>
+                    <input type="file" id="nsfw-image" accept="image/*" style="display: none;">
+                    <div id="nsfw-preview" style="margin-top: 10px;"></div>
+                </div>
+            </div>
+
+            <button class="btn" onclick="analyzeNSFW()">Анализировать изображение</button>
+
+            <div class="loading" id="nsfw-loading">
+                <div class="spinner"></div>
+                <p>Анализируем изображение...</p>
+            </div>
+
+            <div class="result" id="nsfw-result" style="display: none;"></div>
+        </div>
+
+        <!-- Статус системы -->
+        <div id="status" class="tab-content">
+            <h2>Статус системы</h2>
+            <p>Информация о состоянии ML моделей и сервера</p>
+            
+            <div class="health-status">
+                <h3>Состояние сервера:</h3>
+                <div id="server-status">Проверка...</div>
+                
+                <h3 style="margin-top: 20px;">Состояние моделей:</h3>
+                <div class="model-status" id="model-status">
+                    Загрузка...
+                </div>
+            </div>
+
+            <button class="btn" onclick="checkHealth()">Обновить статус</button>
+        </div>
+    </div>
+
+    <script>
+        // Конфигурация
+        const API_BASE_URL = 'https://your-server-domain.com:8000'; // Замените на ваш домен
+
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeFileUploads();
+            checkHealth();
+        });
+
+        // Переключение вкладок
+        function switchTab(tabName) {
+            // Скрыть все вкладки
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Показать выбранную вкладку
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Инициализация загрузки файлов
+        function initializeFileUploads() {
+            // Мультимодальная загрузка
+            const multimodalUpload = document.getElementById('multimodal-upload');
+            const multimodalImage = document.getElementById('multimodal-image');
+            const multimodalPreview = document.getElementById('multimodal-preview');
+
+            multimodalUpload.addEventListener('click', () => multimodalImage.click());
+            multimodalUpload.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                multimodalUpload.classList.add('dragover');
+            });
+            multimodalUpload.addEventListener('dragleave', () => {
+                multimodalUpload.classList.remove('dragover');
+            });
+            multimodalUpload.addEventListener('drop', (e) => {
+                e.preventDefault();
+                multimodalUpload.classList.remove('dragover');
+                if (e.dataTransfer.files.length) {
+                    handleImageUpload(e.dataTransfer.files[0], multimodalPreview, multimodalImage);
+                }
+            });
+            multimodalImage.addEventListener('change', (e) => {
+                if (e.target.files.length) {
+                    handleImageUpload(e.target.files[0], multimodalPreview, multimodalImage);
+                }
+            });
+
+            // NSFW загрузка
+            const nsfwUpload = document.getElementById('nsfw-upload');
+            const nsfwImage = document.getElementById('nsfw-image');
+            const nsfwPreview = document.getElementById('nsfw-preview');
+
+            nsfwUpload.addEventListener('click', () => nsfwImage.click());
+            nsfwUpload.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                nsfwUpload.classList.add('dragover');
+            });
+            nsfwUpload.addEventListener('dragleave', () => {
+                nsfwUpload.classList.remove('dragover');
+            });
+            nsfwUpload.addEventListener('drop', (e) => {
+                e.preventDefault();
+                nsfwUpload.classList.remove('dragover');
+                if (e.dataTransfer.files.length) {
+                    handleImageUpload(e.dataTransfer.files[0], nsfwPreview, nsfwImage);
+                }
+            });
+            nsfwImage.addEventListener('change', (e) => {
+                if (e.target.files.length) {
+                    handleImageUpload(e.target.files[0], nsfwPreview, nsfwImage);
+                }
+            });
+        }
+
+        // Обработка загрузки изображения
+        function handleImageUpload(file, previewElement, inputElement) {
+            if (!file.type.match('image.*')) {
+                alert('Пожалуйста, выберите файл изображения');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                previewElement.innerHTML = `
+                    <img src="${e.target.result}" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
+                    <p>${file.name}</p>
+                `;
+            };
+            reader.readAsDataURL(file);
+
+            // Создаем новый FileList (обход ограничений браузера)
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            inputElement.files = dataTransfer.files;
+        }
+
+        // Мультимодальный анализ
+        async function analyzeMultimodal() {
+            const text = document.getElementById('multimodal-text').value;
+            const imageFile = document.getElementById('multimodal-image').files[0];
+
+            if (!text.trim() && !imageFile) {
+                alert('Пожалуйста, введите текст или загрузите изображение');
+                return;
+            }
+
+            const loading = document.getElementById('multimodal-loading');
+            const result = document.getElementById('multimodal-result');
+
+            loading.style.display = 'block';
+            result.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('text', text);
+                if (imageFile) {
+                    formData.append('image', imageFile);
+                }
+
+                const response = await fetch(`${API_BASE_URL}/api/classify_message/`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                displayMultimodalResult(data);
+            } catch (error) {
+                showError(result, 'Ошибка при анализе: ' + error.message);
+            } finally {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+            }
+        }
+
+        // Анализ только текста
+        async function analyzeTextOnly() {
+            const text = document.getElementById('text-only-input').value;
+
+            if (!text.trim()) {
+                alert('Пожалуйста, введите текст для анализа');
+                return;
+            }
+
+            const loading = document.getElementById('text-loading');
+            const result = document.getElementById('text-result');
+
+            loading.style.display = 'block';
+            result.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/classify_text/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayTextResult(data);
+            } catch (error) {
+                showError(result, 'Ошибка при анализе текста: ' + error.message);
+            } finally {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+            }
+        }
+
+        // NSFW анализ
+        async function analyzeNSFW() {
+            const imageFile = document.getElementById('nsfw-image').files[0];
+
+            if (!imageFile) {
+                alert('Пожалуйста, выберите изображение для анализа');
+                return;
+            }
+
+            const loading = document.getElementById('nsfw-loading');
+            const result = document.getElementById('nsfw-result');
+
+            loading.style.display = 'block';
+            result.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', imageFile);
+
+                const response = await fetch(`${API_BASE_URL}/api/classify_nsfw_image/`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayNSFWResult(data);
+            } catch (error) {
+                showError(result, 'Ошибка при анализе изображения: ' + error.message);
+            } finally {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+            }
+        }
+
+        // Отображение результатов мультимодального анализа
+        function displayMultimodalResult(data) {
+            const result = document.getElementById('multimodal-result');
+            const probPercent = (data.prediction_prob_ad * 100).toFixed(1);
+            const confidencePercent = (data.confidence * 100).toFixed(1);
+
+            result.className = `result ${data.is_ad ? 'ad' : 'not-ad'}`;
+            result.innerHTML = `
+                <h3>${data.is_ad ? '🚫 РЕКЛАМА' : '✅ НЕ РЕКЛАМА'}</h3>
+                <p>Вероятность рекламы: <strong>${probPercent}%</strong></p>
+                <div class="probability-bar">
+                    <div class="probability-fill ${data.is_ad ? 'ad' : ''}" style="width: ${probPercent}%"></div>
+                </div>
+                <p>Уверенность: ${confidencePercent}%</p>
+                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
+            `;
+        }
+
+        // Отображение результатов текстового анализа
+        function displayTextResult(data) {
+            const result = document.getElementById('text-result');
+            const probPercent = (data.prediction_prob_ad * 100).toFixed(1);
+            const confidencePercent = (data.confidence * 100).toFixed(1);
+
+            result.className = `result ${data.is_ad ? 'ad' : 'not-ad'}`;
+            result.innerHTML = `
+                <h3>${data.is_ad ? '🚫 РЕКЛАМА' : '✅ НЕ РЕКЛАМА'}</h3>
+                <p>Вероятность рекламы: <strong>${probPercent}%</strong></p>
+                <div class="probability-bar">
+                    <div class="probability-fill ${data.is_ad ? 'ad' : ''}" style="width: ${probPercent}%"></div>
+                </div>
+                <p>Уверенность: ${confidencePercent}%</p>
+                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
+            `;
+        }
+
+        // Отображение результатов NSFW анализа
+        function displayNSFWResult(data) {
+            const result = document.getElementById('nsfw-result');
+            const probPercent = (data.prediction_prob_nsfw * 100).toFixed(1);
+            const confidencePercent = (data.confidence * 100).toFixed(1);
+
+            result.className = `result ${data.is_nsfw ? 'nsfw' : ''}`;
+            result.innerHTML = `
+                <h3>${data.is_nsfw ? '🔞 NSFW КОНТЕНТ' : '✅ БЕЗОПАСНЫЙ КОНТЕНТ'}</h3>
+                <p>Вероятность NSFW: <strong>${probPercent}%</strong></p>
+                <div class="probability-bar">
+                    <div class="probability-fill nsfw" style="width: ${probPercent}%"></div>
+                </div>
+                <p>Уверенность: ${confidencePercent}%</p>
+                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
+            `;
+        }
+
+        // Показать ошибку
+        function showError(resultElement, message) {
+            resultElement.className = 'result';
+            resultElement.innerHTML = `
+                <h3 style="color: #e74c3c;">❌ Ошибка</h3>
+                <p>${message}</p>
+            `;
+        }
+
+        // Проверка здоровья системы
+        async function checkHealth() {
+            const statusElement = document.getElementById('server-status');
+            const modelStatusElement = document.getElementById('model-status');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/health`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                statusElement.innerHTML = `
+                    <span class="status-indicator status-online"></span>
+                    <strong>Сервер работает</strong>
+                    <p>Статус: ${data.status}</p>
+                    <p>Устройство: ${data.device}</p>
+                `;
+
+                modelStatusElement.innerHTML = `
+                    <div>
+                        <span class="status-indicator ${data.multimodal_model_loaded ? 'status-online' : 'status-offline'}"></span>
+                        Мультимодальная модель: ${data.multimodal_model_loaded ? 'Загружена' : 'Не загружена'}
+                    </div>
+                    <div>
+                        <span class="status-indicator ${data.text_only_model_loaded ? 'status-online' : 'status-offline'}"></span>
+                        Текстовая модель: ${data.text_only_model_loaded ? 'Загружена' : 'Не загружена'}
+                    </div>
+                    <div>
+                        <span class="status-indicator ${data.nsfw_model_loaded ? 'status-online' : 'status-offline'}"></span>
+                        NSFW модель: ${data.nsfw_model_loaded ? 'Загружена' : 'Не загружена'}
+                    </div>
+                `;
+
+            } catch (error) {
+                statusElement.innerHTML = `
+                    <span class="status-indicator status-offline"></span>
+                    <strong>Сервер недоступен</strong>
+                    <p>Ошибка: ${error.message}</p>
+                `;
+                modelStatusElement.innerHTML = 'Не удалось получить статус моделей';
+            }
+        }
+    </script>
+</body>
+</html>
