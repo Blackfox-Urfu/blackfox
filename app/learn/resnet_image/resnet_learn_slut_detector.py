@@ -1,3 +1,4 @@
+#resnet_learn_slut_detector.py
 import os
 import sys
 from collections import Counter
@@ -69,9 +70,9 @@ print(f"Using device: {DEVICE}")
 PERFORM_OPTUNA_SEARCH = True
 IMG_SIZE = 256
 BATCH_SIZE = 512
-EPOCHS = 6
+EPOCHS = 7
 PATIENCE = 3
-OPTUNA_N_TRIALS = 10
+OPTUNA_N_TRIALS = 300
 OPTUNA_EPOCHS = 3
 OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
 OPTUNA_DATASET_FRACTION = 1 / 10
@@ -762,15 +763,15 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
     params = {
         "base_model": trial.suggest_categorical("base_model", ["resnet18", "resnet34"]),
         "unfreeze_strategy": trial.suggest_categorical("unfreeze_strategy", ["fc_only", "all"]),
-        "n_fc_layers": trial.suggest_int("n_fc_layers", 1, 3)
+        "n_fc_layers": trial.suggest_int("n_fc_layers", 1, 3, 4, 5, 6)
     }
     for i in range(params["n_fc_layers"]):
-        params[f"fc_units_l{i}"] = trial.suggest_int(f"fc_units_l{i}", 64, 1024, step=64)
-        params[f"fc_dropout_l{i}"] = trial.suggest_float(f"fc_dropout_l{i}", 0.1, 0.6, step=0.05)
+        params[f"fc_units_l{i}"] = trial.suggest_int(f"fc_units_l{i}", 64, 1024, step=8)
+        params[f"fc_dropout_l{i}"] = trial.suggest_float(f"fc_dropout_l{i}", 0.1, 0.9, step=0.05)
 
     lr_fc = trial.suggest_float("lr_fc", 1e-5, 1e-3, log=True)
-    lr_backbone = trial.suggest_float("lr_backbone", 5e-6, 5e-4, log=True)
-    weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
+    lr_backbone = trial.suggest_float("lr_backbone", 5e-6, 5e-0, log=True)
+    weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-0, log=True)
 
     model = create_configurable_model(params).to(DEVICE)
 

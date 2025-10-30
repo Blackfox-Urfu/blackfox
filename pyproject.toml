@@ -6,7 +6,7 @@ authors = [
     {name = "unser229",email = "nzlobin041@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "scikit-learn (>=1.7.0,<2.0.0)",
     "joblib (>=1.5.1,<2.0.0)",
@@ -20,9 +20,8 @@ dependencies = [
     "fastapi (>=0.115.12,<0.116.0)",
     "uvicorn (>=0.34.3,<0.35.0)",
     "python-multipart (>=0.0.20,<0.0.21)",
-    "torch (>=2.7.1,<3.0.0)",
-    "torchvision (>=0.22.1,<0.23.0)",
-    "prometheus-fastapi-instrumentator (>=7.1.0,<8.0.0)", 
+    "prometheus-fastapi-instrumentator (>=7.1.0,<8.0.0)",
+    "dotenv (>=0.9.9,<0.10.0)", 
 ]
 
 
@@ -32,3 +31,9 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 package-mode = false
+
+
+[[tool.poetry.source]]
+name = "pytorch_nightly"
+url = "https://download.pytorch.org/whl/nightly/cu121"
+priority = "explicit"

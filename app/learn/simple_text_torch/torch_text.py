@@ -1,3 +1,4 @@
+#torch_text.py
 import json
 import csv
 import os
@@ -40,9 +41,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # --- Настройка оборудования (без изменений) ---
 # num_workers теперь будет определяться внутри main, чтобы избежать проблем с multiprocessing
-device = torch.device('cpu')
-use_gpu = False
-print(f"Using device: {device}")
+
 
 
 # --- Функции загрузки и обработки данных (без изменений) ---
@@ -193,13 +192,13 @@ def validate_model(model, dataloader, criterion, device):
 # --- ИЗМЕНЕНИЕ: Функция objective теперь принимает dataloader'ы как аргументы ---
 def objective(trial, train_dataset, val_dataset, sample_weights, num_workers):
     # Гиперпараметры (без изменений)
-    num_layers = trial.suggest_int('num_layers', 1, 12, step=1)
+    num_layers = trial.suggest_int('num_layers', 1, 24, step=1)
     hidden_sizes = []
-    last_hidden_size = trial.suggest_int('hidden_size_0', 64, 2048, step=64)
+    last_hidden_size = trial.suggest_int('hidden_size_0', 64, 4096, step=8)
     hidden_sizes.append(last_hidden_size)
     for i in range(1, num_layers): last_hidden_size = trial.suggest_int(f'hidden_size_{i}', 64, last_hidden_size); hidden_sizes.append(last_hidden_size)
-    dropout = trial.suggest_float('dropout', 0.5, 0.7, step=0.025)
-    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
+    dropout = trial.suggest_float('dropout', 0.1, 0.9, step=0.005)
+    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-0, log=True)
     batch_size = trial.suggest_categorical('batch_size', [16, 32, 64, 128, 256, 512, 1024, 2048])
     activation = trial.suggest_categorical('activation', ['relu', 'leaky_relu', 'elu'])
     use_batch_norm = trial.suggest_categorical('use_batch_norm', [True, False])
@@ -239,6 +238,9 @@ def objective(trial, train_dataset, val_dataset, sample_weights, num_workers):
 
 # Основной код
 if __name__ == "__main__":
+    use_gpu = torch.cuda.is_available()
+    device = torch.device('cuda' if use_gpu else 'cpu')
+    print(f"Using device: {device}")
     # --- ИЗМЕНЕНИЕ: Установка метода запуска multiprocessing для кросс-платформенности ---
     try:
         multiprocessing.set_start_method('spawn')
@@ -296,7 +298,7 @@ if __name__ == "__main__":
     opt_start_time = time.time()
     try:
         # --- ИЗМЕНЕНИЕ: Передаем датасеты и веса в objective ---
-        study.optimize(lambda trial: objective(trial, train_dataset_opt, val_dataset_opt, sample_weights, num_workers), n_trials=2, timeout=18000, n_jobs=1)
+        study.optimize(lambda trial: objective(trial, train_dataset_opt, val_dataset_opt, sample_weights, num_workers), n_trials=2000, timeout=18000, n_jobs=1)
     except Exception as e: print(f"\nOptimization stopped due to an error: {e}"); import traceback; traceback.print_exc()
     opt_duration = time.time() - opt_start_time
     print(f"Optimization finished in {opt_duration:.2f} seconds.")
