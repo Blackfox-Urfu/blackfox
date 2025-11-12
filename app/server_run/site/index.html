@@ -171,6 +171,12 @@
             border-left-color: #e67e22;
             background: #fef9f2;
         }
+        
+        /* Добавлен класс для безопасного контента */
+        .result.safe {
+             border-left-color: #27ae60;
+            background: #f2fdf2;
+        }
 
         .probability-bar {
             height: 20px;
@@ -190,9 +196,17 @@
         .probability-fill.ad {
             background: linear-gradient(90deg, #e74c3c, #c0392b);
         }
+        
+        .probability-fill.not-ad {
+            background: linear-gradient(90deg, #27ae60, #2ecc71);
+        }
 
         .probability-fill.nsfw {
             background: linear-gradient(90deg, #e67e22, #d35400);
+        }
+        
+        .probability-fill.safe {
+            background: linear-gradient(90deg, #27ae60, #2ecc71);
         }
 
         .loading {
@@ -241,8 +255,8 @@
 
         .model-status {
             display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
+            flex-direction: column; /* Изменено для лучшего отображения на мобильных */
+            gap: 10px; /* Добавлен отступ между элементами */
         }
 
         @media (max-width: 768px) {
@@ -272,15 +286,41 @@
             <p>Определение рекламного контента и NSFW изображений</p>
         </div>
 
+        <!-- ИЗМЕНЕНИЕ 1: Порядок кнопок изменен, класс 'active' перенесен на NSFW -->
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('multimodal')">Мультимодальный анализ</button>
+            <button class="tab active" onclick="switchTab('nsfw')">NSFW изображения</button>
+            <button class="tab" onclick="switchTab('multimodal')">Мультимодальный анализ</button>
             <button class="tab" onclick="switchTab('text-only')">Только текст</button>
-            <button class="tab" onclick="switchTab('nsfw')">NSFW изображения</button>
             <button class="tab" onclick="switchTab('status')">Статус системы</button>
         </div>
 
+        <!-- ИЗМЕНЕНИЕ 2: Порядок контента изменен, класс 'active' перенесен на NSFW -->
+        <!-- NSFW анализ -->
+        <div id="nsfw" class="tab-content active">
+            <h2>NSFW анализ изображений</h2>
+            <p>Определение неприемлемого контента (Not Safe For Work) на изображениях</p>
+            
+            <div class="form-group">
+                <label>Изображение для анализа:</label>
+                <div class="file-upload" id="nsfw-upload">
+                    <p>Перетащите изображение сюда или кликните для выбора</p>
+                    <input type="file" id="nsfw-image" accept="image/*" style="display: none;">
+                    <div id="nsfw-preview" style="margin-top: 10px;"></div>
+                </div>
+            </div>
+
+            <button class="btn" onclick="analyzeNSFW()">Анализировать изображение</button>
+
+            <div class="loading" id="nsfw-loading">
+                <div class="spinner"></div>
+                <p>Анализируем изображение...</p>
+            </div>
+
+            <div class="result" id="nsfw-result" style="display: none;"></div>
+        </div>
+
         <!-- Мультимодальный анализ -->
-        <div id="multimodal" class="tab-content active">
+        <div id="multimodal" class="tab-content">
             <h2>Мультимодальный анализ контента</h2>
             <p>Анализ текста и изображения для определения рекламного контента</p>
             
@@ -328,30 +368,6 @@
             <div class="result" id="text-result" style="display: none;"></div>
         </div>
 
-        <!-- NSFW анализ -->
-        <div id="nsfw" class="tab-content">
-            <h2>NSFW анализ изображений</h2>
-            <p>Определение неприемлемого контента (Not Safe For Work) на изображениях</p>
-            
-            <div class="form-group">
-                <label>Изображение для анализа:</label>
-                <div class="file-upload" id="nsfw-upload">
-                    <p>Перетащите изображение сюда или кликните для выбора</p>
-                    <input type="file" id="nsfw-image" accept="image/*" style="display: none;">
-                    <div id="nsfw-preview" style="margin-top: 10px;"></div>
-                </div>
-            </div>
-
-            <button class="btn" onclick="analyzeNSFW()">Анализировать изображение</button>
-
-            <div class="loading" id="nsfw-loading">
-                <div class="spinner"></div>
-                <p>Анализируем изображение...</p>
-            </div>
-
-            <div class="result" id="nsfw-result" style="display: none;"></div>
-        </div>
-
         <!-- Статус системы -->
         <div id="status" class="tab-content">
             <h2>Статус системы</h2>
@@ -373,83 +389,70 @@
 
     <script>
         // Конфигурация
-        const API_BASE_URL = 'https://your-server-domain.com:8000'; // Замените на ваш домен
+        const API_BASE_URL = window.location.origin; // Автоматически использует домен, с которого загружена страница
 
         // Инициализация
         document.addEventListener('DOMContentLoaded', function() {
             initializeFileUploads();
             checkHealth();
+            // Устанавливаем API_BASE_URL, если он не был определен автоматически (например, при открытии локального файла)
+            if (!API_BASE_URL.startsWith('http')) {
+                console.warn("Could not determine API_BASE_URL automatically. Falling back to default. Please replace 'your-server-domain.com'.");
+                API_BASE_URL = 'https://blackfoxus.ru:443'; // Замените на ваш домен как запасной вариант
+            }
         });
 
         // Переключение вкладок
         function switchTab(tabName) {
-            // Скрыть все вкладки
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
 
-            // Показать выбранную вкладку
             document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
+            // event.target - это элемент, по которому кликнули
+            const clickedButton = event.target;
+            clickedButton.classList.add('active');
         }
 
         // Инициализация загрузки файлов
         function initializeFileUploads() {
             // Мультимодальная загрузка
-            const multimodalUpload = document.getElementById('multimodal-upload');
-            const multimodalImage = document.getElementById('multimodal-image');
-            const multimodalPreview = document.getElementById('multimodal-preview');
-
-            multimodalUpload.addEventListener('click', () => multimodalImage.click());
-            multimodalUpload.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                multimodalUpload.classList.add('dragover');
-            });
-            multimodalUpload.addEventListener('dragleave', () => {
-                multimodalUpload.classList.remove('dragover');
-            });
-            multimodalUpload.addEventListener('drop', (e) => {
-                e.preventDefault();
-                multimodalUpload.classList.remove('dragover');
-                if (e.dataTransfer.files.length) {
-                    handleImageUpload(e.dataTransfer.files[0], multimodalPreview, multimodalImage);
-                }
-            });
-            multimodalImage.addEventListener('change', (e) => {
-                if (e.target.files.length) {
-                    handleImageUpload(e.target.files[0], multimodalPreview, multimodalImage);
-                }
-            });
-
+            setupUpload('multimodal-upload', 'multimodal-image', 'multimodal-preview');
             // NSFW загрузка
-            const nsfwUpload = document.getElementById('nsfw-upload');
-            const nsfwImage = document.getElementById('nsfw-image');
-            const nsfwPreview = document.getElementById('nsfw-preview');
+            setupUpload('nsfw-upload', 'nsfw-image', 'nsfw-preview');
+        }
 
-            nsfwUpload.addEventListener('click', () => nsfwImage.click());
-            nsfwUpload.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                nsfwUpload.classList.add('dragover');
+        function setupUpload(uploadId, inputId, previewId) {
+            const uploadArea = document.getElementById(uploadId);
+            const fileInput = document.getElementById(inputId);
+            const preview = document.getElementById(previewId);
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
             });
-            nsfwUpload.addEventListener('dragleave', () => {
-                nsfwUpload.classList.remove('dragover');
-            });
-            nsfwUpload.addEventListener('drop', (e) => {
+
+            function preventDefaults(e) {
                 e.preventDefault();
-                nsfwUpload.classList.remove('dragover');
+                e.stopPropagation();
+            }
+
+            uploadArea.addEventListener('dragover', () => uploadArea.classList.add('dragover'));
+            uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+
+            uploadArea.addEventListener('drop', (e) => {
+                uploadArea.classList.remove('dragover');
                 if (e.dataTransfer.files.length) {
-                    handleImageUpload(e.dataTransfer.files[0], nsfwPreview, nsfwImage);
+                    handleImageUpload(e.dataTransfer.files[0], preview, fileInput);
                 }
             });
-            nsfwImage.addEventListener('change', (e) => {
+            fileInput.addEventListener('change', (e) => {
                 if (e.target.files.length) {
-                    handleImageUpload(e.target.files[0], nsfwPreview, nsfwImage);
+                    handleImageUpload(e.target.files[0], preview, fileInput);
                 }
             });
         }
+
 
         // Обработка загрузки изображения
         function handleImageUpload(file, previewElement, inputElement) {
@@ -466,15 +469,41 @@
                 `;
             };
             reader.readAsDataURL(file);
-
-            // Создаем новый FileList (обход ограничений браузера)
+            
             const dataTransfer = new DataTransfer();
             dataTransfer.items.add(file);
             inputElement.files = dataTransfer.files;
         }
 
+        // Общая функция для выполнения запросов
+        async function makeApiRequest(endpoint, options, loadingId, resultId, displayFunction) {
+            const loading = document.getElementById(loadingId);
+            const result = document.getElementById(resultId);
+
+            loading.style.display = 'block';
+            result.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Не удалось прочитать ошибку с сервера.' }));
+                    throw new Error(`Ошибка ${response.status}: ${errorData.detail || response.statusText}`);
+                }
+
+                const data = await response.json();
+                displayFunction(data);
+            } catch (error) {
+                showError(result, `Ошибка при запросе к API: ${error.message}`);
+            } finally {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+            }
+        }
+
+
         // Мультимодальный анализ
-        async function analyzeMultimodal() {
+        function analyzeMultimodal() {
             const text = document.getElementById('multimodal-text').value;
             const imageFile = document.getElementById('multimodal-image').files[0];
 
@@ -482,42 +511,24 @@
                 alert('Пожалуйста, введите текст или загрузите изображение');
                 return;
             }
-
-            const loading = document.getElementById('multimodal-loading');
-            const result = document.getElementById('multimodal-result');
-
-            loading.style.display = 'block';
-            result.style.display = 'none';
-
-            try {
-                const formData = new FormData();
-                formData.append('text', text);
-                if (imageFile) {
-                    formData.append('image', imageFile);
-                }
-
-                const response = await fetch(`${API_BASE_URL}/api/classify_message/`, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-
-                displayMultimodalResult(data);
-            } catch (error) {
-                showError(result, 'Ошибка при анализе: ' + error.message);
-            } finally {
-                loading.style.display = 'none';
-                result.style.display = 'block';
+            
+            const formData = new FormData();
+            formData.append('text', text);
+            if (imageFile) {
+                formData.append('image', imageFile);
             }
+
+            makeApiRequest(
+                '/api/classify_message/',
+                { method: 'POST', body: formData },
+                'multimodal-loading',
+                'multimodal-result',
+                displayAdResult
+            );
         }
 
         // Анализ только текста
-        async function analyzeTextOnly() {
+        function analyzeTextOnly() {
             const text = document.getElementById('text-only-input').value;
 
             if (!text.trim()) {
@@ -525,37 +536,21 @@
                 return;
             }
 
-            const loading = document.getElementById('text-loading');
-            const result = document.getElementById('text-result');
-
-            loading.style.display = 'block';
-            result.style.display = 'none';
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/classify_text/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+            makeApiRequest(
+                '/api/classify_text/',
+                { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                displayTextResult(data);
-            } catch (error) {
-                showError(result, 'Ошибка при анализе текста: ' + error.message);
-            } finally {
-                loading.style.display = 'none';
-                result.style.display = 'block';
-            }
+                },
+                'text-loading',
+                'text-result',
+                displayAdResult
+            );
         }
 
         // NSFW анализ
-        async function analyzeNSFW() {
+        function analyzeNSFW() {
             const imageFile = document.getElementById('nsfw-image').files[0];
 
             if (!imageFile) {
@@ -563,70 +558,44 @@
                 return;
             }
 
-            const loading = document.getElementById('nsfw-loading');
-            const result = document.getElementById('nsfw-result');
+            const formData = new FormData();
+            formData.append('file', imageFile);
 
-            loading.style.display = 'block';
-            result.style.display = 'none';
+            makeApiRequest(
+                '/api/classify_nsfw_image/',
+                { method: 'POST', body: formData },
+                'nsfw-loading',
+                'nsfw-result',
+                displayNSFWResult
+            );
+        }
+        
+        // Общая функция для отображения результатов "Реклама / Не реклама"
+        function displayAdResult(data, resultId) {
+            const result = document.getElementById(resultId);
+            const probPercent = (data.prediction_prob_ad * 100).toFixed(1);
+            const confidencePercent = (data.confidence * 100).toFixed(1);
 
-            try {
-                const formData = new FormData();
-                formData.append('file', imageFile);
-
-                const response = await fetch(`${API_BASE_URL}/api/classify_nsfw_image/`, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                displayNSFWResult(data);
-            } catch (error) {
-                showError(result, 'Ошибка при анализе изображения: ' + error.message);
-            } finally {
-                loading.style.display = 'none';
-                result.style.display = 'block';
-            }
+            result.className = `result ${data.is_ad ? 'ad' : 'not-ad'}`;
+            result.innerHTML = `
+                <h3>${data.is_ad ? '🚫 РЕКЛАМА' : '✅ НЕ РЕКЛАМА'}</h3>
+                <p>Вероятность рекламы: <strong>${probPercent}%</strong></p>
+                <div class="probability-bar">
+                    <div class="probability-fill ${data.is_ad ? 'ad' : 'not-ad'}" style="width: ${probPercent}%"></div>
+                </div>
+                <p>Уверенность: ${confidencePercent}%</p>
+                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
+            `;
         }
 
-        // Отображение результатов мультимодального анализа
+        // Перенаправляем старые функции на новую
         function displayMultimodalResult(data) {
-            const result = document.getElementById('multimodal-result');
-            const probPercent = (data.prediction_prob_ad * 100).toFixed(1);
-            const confidencePercent = (data.confidence * 100).toFixed(1);
-
-            result.className = `result ${data.is_ad ? 'ad' : 'not-ad'}`;
-            result.innerHTML = `
-                <h3>${data.is_ad ? '🚫 РЕКЛАМА' : '✅ НЕ РЕКЛАМА'}</h3>
-                <p>Вероятность рекламы: <strong>${probPercent}%</strong></p>
-                <div class="probability-bar">
-                    <div class="probability-fill ${data.is_ad ? 'ad' : ''}" style="width: ${probPercent}%"></div>
-                </div>
-                <p>Уверенность: ${confidencePercent}%</p>
-                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
-            `;
+            displayAdResult(data, 'multimodal-result');
         }
-
-        // Отображение результатов текстового анализа
         function displayTextResult(data) {
-            const result = document.getElementById('text-result');
-            const probPercent = (data.prediction_prob_ad * 100).toFixed(1);
-            const confidencePercent = (data.confidence * 100).toFixed(1);
-
-            result.className = `result ${data.is_ad ? 'ad' : 'not-ad'}`;
-            result.innerHTML = `
-                <h3>${data.is_ad ? '🚫 РЕКЛАМА' : '✅ НЕ РЕКЛАМА'}</h3>
-                <p>Вероятность рекламы: <strong>${probPercent}%</strong></p>
-                <div class="probability-bar">
-                    <div class="probability-fill ${data.is_ad ? 'ad' : ''}" style="width: ${probPercent}%"></div>
-                </div>
-                <p>Уверенность: ${confidencePercent}%</p>
-                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
-            `;
+            displayAdResult(data, 'text-result');
         }
+
 
         // Отображение результатов NSFW анализа
         function displayNSFWResult(data) {
@@ -634,12 +603,12 @@
             const probPercent = (data.prediction_prob_nsfw * 100).toFixed(1);
             const confidencePercent = (data.confidence * 100).toFixed(1);
 
-            result.className = `result ${data.is_nsfw ? 'nsfw' : ''}`;
+            result.className = `result ${data.is_nsfw ? 'nsfw' : 'safe'}`;
             result.innerHTML = `
                 <h3>${data.is_nsfw ? '🔞 NSFW КОНТЕНТ' : '✅ БЕЗОПАСНЫЙ КОНТЕНТ'}</h3>
                 <p>Вероятность NSFW: <strong>${probPercent}%</strong></p>
                 <div class="probability-bar">
-                    <div class="probability-fill nsfw" style="width: ${probPercent}%"></div>
+                    <div class="probability-fill ${data.is_nsfw ? 'nsfw' : 'safe'}" style="width: ${probPercent}%"></div>
                 </div>
                 <p>Уверенность: ${confidencePercent}%</p>
                 ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
@@ -659,6 +628,9 @@
         async function checkHealth() {
             const statusElement = document.getElementById('server-status');
             const modelStatusElement = document.getElementById('model-status');
+            
+            statusElement.innerHTML = 'Проверка...';
+            modelStatusElement.innerHTML = 'Загрузка статуса моделей...';
 
             try {
                 const response = await fetch(`${API_BASE_URL}/health`);
@@ -674,20 +646,19 @@
                     <p>Статус: ${data.status}</p>
                     <p>Устройство: ${data.device}</p>
                 `;
+                
+                // Функция для создания статуса модели
+                const createModelStatus = (name, isLoaded) => `
+                    <div>
+                        <span class="status-indicator ${isLoaded ? 'status-online' : 'status-offline'}"></span>
+                        ${name}: <strong>${isLoaded ? 'Загружена' : 'Не загружена'}</strong>
+                    </div>
+                `;
 
                 modelStatusElement.innerHTML = `
-                    <div>
-                        <span class="status-indicator ${data.multimodal_model_loaded ? 'status-online' : 'status-offline'}"></span>
-                        Мультимодальная модель: ${data.multimodal_model_loaded ? 'Загружена' : 'Не загружена'}
-                    </div>
-                    <div>
-                        <span class="status-indicator ${data.text_only_model_loaded ? 'status-online' : 'status-offline'}"></span>
-                        Текстовая модель: ${data.text_only_model_loaded ? 'Загружена' : 'Не загружена'}
-                    </div>
-                    <div>
-                        <span class="status-indicator ${data.nsfw_model_loaded ? 'status-online' : 'status-offline'}"></span>
-                        NSFW модель: ${data.nsfw_model_loaded ? 'Загружена' : 'Не загружена'}
-                    </div>
+                    ${createModelStatus('Мультимодальная модель', data.multimodal_model_loaded)}
+                    ${createModelStatus('Текстовая модель', data.text_only_model_loaded)}
+                    ${createModelStatus('NSFW модель', data.nsfw_model_loaded)}
                 `;
 
             } catch (error) {
@@ -696,7 +667,7 @@
                     <strong>Сервер недоступен</strong>
                     <p>Ошибка: ${error.message}</p>
                 `;
-                modelStatusElement.innerHTML = 'Не удалось получить статус моделей';
+                modelStatusElement.innerHTML = 'Не удалось получить статус моделей.';
             }
         }
     </script>
