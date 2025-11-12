@@ -298,7 +298,7 @@ if __name__ == "__main__":
     opt_start_time = time.time()
     try:
         # --- ИЗМЕНЕНИЕ: Передаем датасеты и веса в objective ---
-        study.optimize(lambda trial: objective(trial, train_dataset_opt, val_dataset_opt, sample_weights, num_workers), n_trials=2000, timeout=18000, n_jobs=1)
+        study.optimize(lambda trial: objective(trial, train_dataset_opt, val_dataset_opt, sample_weights, num_workers), n_trials=500, timeout=18000, n_jobs=1)
     except Exception as e: print(f"\nOptimization stopped due to an error: {e}"); import traceback; traceback.print_exc()
     opt_duration = time.time() - opt_start_time
     print(f"Optimization finished in {opt_duration:.2f} seconds.")
@@ -340,8 +340,8 @@ if __name__ == "__main__":
     all_train_sampler = WeightedRandomSampler(weights=all_sample_weights, num_samples=len(all_train_dataset), replacement=True)
     
     # --- ИЗМЕНЕНИЕ: Создаем DataLoader'ы ОДИН РАЗ перед финальным обучением ---
-    final_train_loader = DataLoader(all_train_dataset, batch_size=batch_size, sampler=all_train_sampler, drop_last=best_params['use_batch_norm'], num_workers=num_workers, pin_memory=use_gpu, persistent_workers=True if num_workers > 0 else False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=use_gpu, persistent_workers=True if num_workers > 0 else False)
+    final_train_loader = DataLoader(all_train_dataset, batch_size=batch_size, sampler=all_train_sampler, drop_last=best_params['use_batch_norm'], num_workers=num_workers, pin_memory=use_gpu, persistent_workers=False if num_workers > 0 else False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=use_gpu, persistent_workers=False if num_workers > 0 else False)
 
     num_epochs_final = 25; scheduler_final = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs_final)
     best_test_f1 = -1.0; optimal_threshold = 0.5
