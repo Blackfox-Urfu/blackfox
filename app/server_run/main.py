@@ -156,9 +156,12 @@ class TextOnlyClassifier:
         self.vectorizer = None
         self.threshold = 0.5
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        logger.info(f"TextOnlyClassifier initialized. Using device: {self.device}")
+        # === НОВЫЙ ПАРАМЕТР: Температура для смягчения предсказаний ===
+        self.temperature = 2.0 # Значение > 1. Можно подобрать (например, 1.5, 2.0, 2.5)
+        logger.info(f"TextOnlyClassifier initialized. Using device: {self.device}, Temperature: {self.temperature}")
 
     def load(self, model_dir: str) -> bool:
+        # ... (код загрузки остается без изменений)
         model_path = os.path.join(model_dir, 'best_final_model.pth')
         vectorizer_path = os.path.join(model_dir, 'final_vectorizer.pkl')
         try:
@@ -189,7 +192,13 @@ class TextOnlyClassifier:
         tensor_input = torch.tensor(vector, dtype=torch.float32).to(self.device)
         with torch.no_grad():
             outputs = self.model(tensor_input)
-            probabilities = torch.softmax(outputs, dim=1)
+            
+            # === ИСПРАВЛЕНИЕ: Применяем температурное масштабирование ===
+            # Делим логиты на температуру, чтобы сделать softmax менее "резким"
+            scaled_outputs = outputs / self.temperature
+            probabilities = torch.softmax(scaled_outputs, dim=1)
+            # ==========================================================
+
             prob_ad = probabilities[0][1].item()
         is_ad = prob_ad > self.threshold
         return prob_ad, is_ad
@@ -209,7 +218,10 @@ class MultimodalClassifier:
             if not all(os.path.exists(p) for p in [model_path, vectorizer_path, scaler_path]): logger.error("One or more multimodal model files not found!"); return False
             self.text_vectorizer = joblib.load(vectorizer_path); self.feature_scaler = joblib.load(scaler_path)
             logger.info("Multimodal vectorizer and scaler loaded.")
-            text_input_size = self.text_vectorizer.max_features; features_input_size = self.feature_scaler.n_features_in_
+            # Важно: Убеждаемся, что количество признаков совпадает
+            text_input_size = self.text_vectorizer.max_features
+            features_input_size = self.feature_scaler.n_features_in_
+            
             self.model = MetaLearner(text_input_size=text_input_size, features_input_size=features_input_size).to(self.device)
             self.model.load_state_dict(torch.load(model_path, map_location=self.device, weights_only=False)); self.model.eval()
             logger.info(f"Multimodal model (MetaLearner) loaded from {model_path}.")
@@ -220,27 +232,49 @@ class MultimodalClassifier:
             self.model, self.text_vectorizer, self.feature_scaler = None, None, None
             return False
 
+    # === ИСПРАВЛЕННЫЙ МЕТОД ===
     def _extract_features(self, text: str, has_image: bool) -> np.ndarray:
-        link_count = len(re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text))
-        features = [len(text), link_count, text.count('@'), text.count('#'), text.count('/'), 0, 0, 0.0, 0.0, 1.0 if has_image else 0.0]
+        # Эта логика должна максимально точно повторять логику из `torch_multimodal.py`
+        text_length = len(text)
+        # Считаем ссылки более надежным способом
+        link_count = len(re.findall(r'http[s]?://\S+', text))
+        mention_count = text.count('@')
+        hashtag_count = text.count('#')
+        # В API у нас только одно изображение, так что это будет 1 или 0
+        attachment_count = 1 if has_image else 0
+        
+        # Создаем вектор признаков в том же порядке, что и при обучении
+        features = [text_length, link_count, mention_count, hashtag_count, attachment_count]
+        
         return np.array(features).reshape(1, -1)
 
     def predict(self, text: str, image: Optional[Image.Image]) -> tuple[float, bool]:
         if not all([self.model, self.text_vectorizer, self.feature_scaler, self.image_transform]): raise RuntimeError("Multimodal model is not loaded.")
+        
         text_vector = self.text_vectorizer.transform([text]).toarray().astype(np.float32)
+        
+        # Используем исправленный метод извлечения признаков
         features_vector_raw = self._extract_features(text, has_image=(image is not None))
         features_vector = self.feature_scaler.transform(features_vector_raw).astype(np.float32)
-        batch = {'text': torch.tensor(text_vector, dtype=torch.float32).to(self.device), 'features': torch.tensor(features_vector, dtype=torch.float32).to(self.device), 'labels': torch.tensor([0]).to(self.device)}
+
+        batch = {
+            'text': torch.tensor(text_vector, dtype=torch.float32).to(self.device), 
+            'features': torch.tensor(features_vector, dtype=torch.float32).to(self.device), 
+            'labels': torch.tensor([0]).to(self.device) # Лейбл-плейсхолдер
+        }
+
         if image:
             try:
                 image_tensor = self.image_transform(image.convert('RGB')).unsqueeze(0)
                 batch['images'] = image_tensor.to(self.device)
                 batch['image_indices'] = torch.tensor([0], dtype=torch.long).to(self.device)
             except Exception as e: logger.warning(f"Could not process image: {e}")
+        
         with torch.no_grad():
             outputs = self.model(batch)
             probabilities = torch.softmax(outputs, dim=1)
             prob_ad = probabilities[0][1].item()
+            
         return prob_ad, prob_ad > 0.5
 
 class ImageClassifier:
