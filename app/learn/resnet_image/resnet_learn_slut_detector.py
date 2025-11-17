@@ -33,8 +33,8 @@ from tqdm import tqdm
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import multiprocessing 
-
-
+import hashlib
+import cv2 
 
 try:
     if '__file__' in locals():
@@ -82,6 +82,9 @@ OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
 OPTUNA_DATASET_FRACTION = 3 / 5
 FINAL_TEST_SET_FRACTION = 0.2
 
+DISK_CACHE_DIR = 'data/resized_cache' # Укажите путь к папке кэша
+os.makedirs(DISK_CACHE_DIR, exist_ok=True)
+
 MODEL_DIR = 'model/resnet'
 os.makedirs(MODEL_DIR, exist_ok=True)
 
@@ -126,121 +129,127 @@ val_transform = A.Compose([
     ToTensorV2(),
 ])
 
-def _load_and_resize_image(path):
+
+
+# --- Датасет ---
+# --- Замените вашу функцию _resize_and_save_worker на эту ---
+
+def _resize_and_save_worker(args):
     """
-    Вспомогательная функция для одного процесса:
-    открывает, меняет размер и возвращает PIL Image или None в случае ошибки.
+    Воркер для мультипроцессинга.
+    Явно кодирует изображение в PNG перед записью во временный файл.
     """
+    original_path, cached_path, img_size = args
+    temp_cached_path = cached_path + ".tmp"
+
     try:
-        # Используем OpenCV, так как он быстрее
-        img_bgr = cv2.imread(path)
+        os.makedirs(os.path.dirname(cached_path), exist_ok=True)
+
+        if os.path.exists(temp_cached_path):
+            os.remove(temp_cached_path)
+
+        # Шаг 1: Читаем и изменяем размер с помощью OpenCV
+        img_bgr = cv2.imread(original_path)
         if img_bgr is None:
-            raise IOError(f"OpenCV could not read image: {path}")
+            raise IOError(f"OpenCV could not read image: {original_path}")
+
+        img_resized = cv2.resize(img_bgr, (img_size, img_size), interpolation=cv2.INTER_AREA)
+
+        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+        # Шаг 2: Явно кодируем изображение в формат .png в памяти.
+        # Это возвращает кортеж (успех, буфер с байтами изображения).
+        success, buffer = cv2.imencode('.png', img_resized)
+        if not success:
+            raise IOError(f"cv2.imencode failed for {original_path}")
+
+        # Шаг 3: Записываем байты из буфера во временный файл.
+        # Теперь imwrite не используется, и расширение .tmp не имеет значения.
+        with open(temp_cached_path, 'wb') as f:
+            f.write(buffer)
+        # ---------------------------
+
+        # Шаг 4: Атомарно переименовываем, как и раньше
+        os.rename(temp_cached_path, cached_path)
         
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        img_resized = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_AREA)
+        return cached_path
         
-        # Конвертируем обратно в PIL Image
-        return Image.fromarray(img_resized)
     except Exception as e:
-        # Возвращаем путь и ошибку для информативного вывода
-        print(f"Warning: could not load {path}. Error: {e}. Skipping.")
+        print(f"\n[CACHE WORKER ERROR] Failed to process {original_path}. Error: {e}\n", flush=True)
+        if os.path.exists(temp_cached_path):
+            try:
+                os.remove(temp_cached_path)
+            except OSError:
+                pass
         return None
 
-def _worker_init(img_size_value):
-    # Создаем глобальную переменную ВНУТРИ рабочего процесса
-    global WORKER_IMG_SIZE
-    WORKER_IMG_SIZE = img_size_value
-    
-def _load_and_resize_image(path):
-    import cv2
-    from PIL import Image
-    
-    try:
-        img_bgr = cv2.imread(path)
-        if img_bgr is None:
-            raise IOError(f"OpenCV could not read image: {path}")
-        
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        
-        # Используем переменную, установленную инициализатором
-        img_resized = cv2.resize(img_rgb, (WORKER_IMG_SIZE, WORKER_IMG_SIZE), interpolation=cv2.INTER_AREA)
-        
-        return Image.fromarray(img_resized)
-    except Exception as e:
-        print(f"Warning: could not load {path}. Error: {e}. Skipping.")
-        return None
-# --- Датасет ---
+
 class NSFWDataset(Dataset):
-    def __init__(self, filepaths, labels, transform=None, cache_ram=True):
+    # __init__ остается таким же, как в прошлый раз
+    def __init__(self, filepaths, labels, transform=None, cache_dir=None, img_size=256):
         self.filepaths = filepaths
         self.labels = labels
         self.transform = transform
-        self.preloaded_images = []
-        self.cache_ram = cache_ram
-
-        if self.cache_ram:
-            print("Starting to preload and cache resized images into RAM in parallel...")
-            num_workers = os.cpu_count() or 1
+        self.img_size = img_size
+        
+        if cache_dir:
+            print(f"Disk caching enabled. Cache directory: {cache_dir}")
+            os.makedirs(cache_dir, exist_ok=True)
             
-            # Используем initializer и initargs для передачи IMG_SIZE в каждый процесс
-            with multiprocessing.Pool(processes=num_workers,
-                                      initializer=_worker_init,
-                                      initargs=(IMG_SIZE,)) as pool:
+            self.cached_filepaths = []
+            for fp in filepaths:
+                hexdigest = hashlib.sha256(fp.encode()).hexdigest()
+                cached_path = os.path.join(cache_dir, hexdigest[:2], hexdigest[2:4], hexdigest + '.png')
+                self.cached_filepaths.append(cached_path)
+
+            tasks_to_cache = []
+            for original_fp, cached_fp in zip(self.filepaths, self.cached_filepaths):
+                if not os.path.exists(cached_fp):
+                    tasks_to_cache.append((original_fp, cached_fp, self.img_size))
+            
+            if tasks_to_cache:
+                print(f"Found {len(tasks_to_cache)} images to cache. Starting pre-caching process...")
+                num_workers = os.cpu_count() or 1
                 
-                results_iterator = pool.imap(_load_and_resize_image, filepaths)
-                self.preloaded_images = list(tqdm(results_iterator, total=len(filepaths), desc="Caching resized images"))
-
-            # Подсчитываем, сколько изображений успешно загружено
-            successful_loads = sum(1 for img in self.preloaded_images if img is not None)
-            print(f"Finished caching. {successful_loads} images preloaded into RAM using {num_workers} processes.")
-
+                with multiprocessing.Pool(processes=num_workers) as pool:
+                    results_iterator = pool.imap_unordered(_resize_and_save_worker, tasks_to_cache)
+                    list(tqdm(results_iterator, total=len(tasks_to_cache), desc="Warming up disk cache"))
+                print("Disk cache warm-up complete.")
+            else:
+                print("All images are already cached.")
+                
+            self.source_filepaths = self.cached_filepaths
+        else:
+            print("Disk caching is disabled. Images will be resized on-the-fly.")
+            self.source_filepaths = self.filepaths
 
     def __len__(self):
-        return len(self.filepaths)
-    def __getitem__(self, idx):
-        # 1. Получаем метку класса, здесь ничего не меняется.
-        label = self.labels[idx]
-        
-        # 2. Получаем базовое изображение (объект PIL.Image).
-        #    Этот блок кода вы уже поняли, он остается таким же.
-        if self.cache_ram:
-            # Берем уже измененное по размеру изображение из списка в ОЗУ
-            pil_img = self.preloaded_images[idx]
-            # Если при кэшировании файл оказался битым, создаем заглушку
-            if pil_img is None:
-                pil_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='red')
-        else:
-            # Старая логика: читаем изображение с диска, если кэширование выключено
-            image_path = self.filepaths[idx]
-            try:
-                pil_img = Image.open(image_path).convert('RGB')
-            except Exception:
-                pil_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='red')
+        return len(self.labels)
 
-        # 3. Применяем трансформации.
-        #    Этот блок полностью заменяется для работы с Albumentations.
+    def __getitem__(self, idx):
+        label = self.labels[idx]
+        image_path = self.source_filepaths[idx]
+
+        try:
+            img_bgr = cv2.imread(image_path)
+            if img_bgr is None:
+                raise IOError(f"Could not read image: {image_path}")
+            
+            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+            # Было: cv2.COLOR_BGR_RGB
+            # Стало: cv2.COLOR_BGR2RGB
+            numpy_img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        except Exception as e:
+            print(f"Error loading image {image_path}: {e}. Returning a red placeholder.")
+            numpy_img = np.full((self.img_size, self.img_size, 3), (255, 0, 0), dtype=np.uint8)
+
         if self.transform:
-            # 3.1. Конвертируем PIL Image в Numpy Array.
-            #      Это ключевой шаг для совместимости с Albumentations.
-            numpy_img = np.array(pil_img)
-            
-            # 3.2. Применяем пайплайн трансформаций Albumentations.
-            #      Он принимает словарь и возвращает словарь.
             transformed = self.transform(image=numpy_img)
-            
-            # 3.3. Извлекаем трансформированное изображение из словаря.
-            #      После ToTensorV2() это уже будет torch.Tensor.
             tensor_img = transformed['image']
         else:
-            # Если трансформации не заданы (маловероятно, но для полноты картины)
-            # Нужно вручную конвертировать PIL в Tensor
-            tensor_img = transforms.ToTensor()(pil_img)
+            tensor_img = transforms.ToTensor()(numpy_img)
 
-        # 4. Возвращаем тензор изображения и тензор метки.
         return tensor_img, torch.tensor(label, dtype=torch.float)
-
-        
 
 # --- (The rest of your helper functions remain the same) ---
 # ...
@@ -822,8 +831,14 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
 
     model = create_configurable_model(params).to(DEVICE)
 
-    train_dataset_optuna = NSFWDataset(X_train_paths, y_train, train_transform, cache_ram=False)
-    val_dataset_optuna = NSFWDataset(X_val_paths, y_val, val_transform, cache_ram=False)
+    train_dataset_optuna = NSFWDataset(
+        X_train_paths, y_train, transform=train_transform,
+        cache_dir=DISK_CACHE_DIR, img_size=IMG_SIZE
+    )
+    val_dataset_optuna = NSFWDataset(
+        X_val_paths, y_val, transform=val_transform,
+        cache_dir=DISK_CACHE_DIR, img_size=IMG_SIZE
+    )
 
     if len(train_dataset_optuna) == 0 or len(val_dataset_optuna) == 0:
         print(f"Warning: Optuna trial {trial.number} has empty train or val dataset. Pruning.")
@@ -1091,8 +1106,20 @@ def main():
         sampler = None
         shuffle_train = True
 
-    train_dataset = NSFWDataset(X_train_full, y_train_full, train_transform, cache_ram=True)
-    test_dataset = NSFWDataset(X_test_final, y_test_final, val_transform, cache_ram=False)
+    train_dataset = NSFWDataset(
+    X_train_full, 
+    y_train_full, 
+    transform=train_transform, 
+    cache_dir=DISK_CACHE_DIR,  # Включаем кэширование на диске
+    img_size=IMG_SIZE
+    )
+    test_dataset = NSFWDataset(
+        X_test_final, 
+        y_test_final, 
+        transform=val_transform, 
+        cache_dir=None, # Отключаем кэширование для тестового набора
+        img_size=IMG_SIZE
+    )
 
     if len(train_dataset) == 0:
         print("Error: Final training dataset is empty. Exiting.")
