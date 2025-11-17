@@ -30,6 +30,10 @@ from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from torchvision import models, transforms
 from tqdm import tqdm
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import multiprocessing 
+
 
 
 try:
@@ -67,15 +71,15 @@ warnings.filterwarnings("ignore", "(?s).*Palette images with Transparency.*")
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {DEVICE}")
 
-PERFORM_OPTUNA_SEARCH = True
+PERFORM_OPTUNA_SEARCH = False
 IMG_SIZE = 256
 BATCH_SIZE = 512
 EPOCHS = 7
 PATIENCE = 3
-OPTUNA_N_TRIALS = 300
+OPTUNA_N_TRIALS = 5
 OPTUNA_EPOCHS = 3
 OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
-OPTUNA_DATASET_FRACTION = 1 / 10
+OPTUNA_DATASET_FRACTION = 3 / 5
 FINAL_TEST_SET_FRACTION = 0.2
 
 MODEL_DIR = 'model/resnet'
@@ -97,103 +101,146 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 FINAL_TEST_DATA_PATHS_FILE = os.path.join(RESULTS_DIR, "final_test_data_paths.txt")
 FINAL_TEST_DATA_LABELS_FILE = os.path.join(RESULTS_DIR, "final_test_data_labels.txt")
 
-SLUT_DATA_DIR = 'data/raw/slut'
-REGULAR_DATA_DIR = 'data/raw/regular'
+SLUT_DATA_DIR = 'data/reddit/nsfw_images'
+REGULAR_DATA_DIR = 'data/reddit/sfw_images'
 
 OPTIMAL_THRESHOLD = 0.5
 
 
 # --- Аугментация данных ---
-train_transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(15),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-    transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), scale=(0.9, 1.1), shear=10),
-    transforms.RandomPerspective(distortion_scale=0.3, p=0.5),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    transforms.RandomErasing(p=0.2, scale=(0.02, 0.2), ratio=(0.3, 3.3)),
+train_transform = A.Compose([
+    A.Resize(IMG_SIZE, IMG_SIZE),
+    A.HorizontalFlip(p=0.5),
+    A.Rotate(limit=15, p=0.5),
+    A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.8),
+    A.Affine(rotate=10, translate_percent=0.1, scale=(0.9, 1.1), shear=10, p=0.5),
+    A.Perspective(scale=(0.05, 0.1), p=0.5), # Обратите внимание, параметры могут отличаться
+    A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    A.CoarseDropout(min_holes=1, max_holes=8, min_height=8, max_height=32, min_width=8, max_width=32, p=0.2),
+    ToTensorV2(),
 ])
 
-val_transform = transforms.Compose([
-    transforms.Resize((IMG_SIZE, IMG_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+val_transform = A.Compose([
+    A.Resize(IMG_SIZE, IMG_SIZE),
+    A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ToTensorV2(),
 ])
 
+def _load_and_resize_image(path):
+    """
+    Вспомогательная функция для одного процесса:
+    открывает, меняет размер и возвращает PIL Image или None в случае ошибки.
+    """
+    try:
+        # Используем OpenCV, так как он быстрее
+        img_bgr = cv2.imread(path)
+        if img_bgr is None:
+            raise IOError(f"OpenCV could not read image: {path}")
+        
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, (IMG_SIZE, IMG_SIZE), interpolation=cv2.INTER_AREA)
+        
+        # Конвертируем обратно в PIL Image
+        return Image.fromarray(img_resized)
+    except Exception as e:
+        # Возвращаем путь и ошибку для информативного вывода
+        print(f"Warning: could not load {path}. Error: {e}. Skipping.")
+        return None
+
+def _worker_init(img_size_value):
+    # Создаем глобальную переменную ВНУТРИ рабочего процесса
+    global WORKER_IMG_SIZE
+    WORKER_IMG_SIZE = img_size_value
+    
+def _load_and_resize_image(path):
+    import cv2
+    from PIL import Image
+    
+    try:
+        img_bgr = cv2.imread(path)
+        if img_bgr is None:
+            raise IOError(f"OpenCV could not read image: {path}")
+        
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        
+        # Используем переменную, установленную инициализатором
+        img_resized = cv2.resize(img_rgb, (WORKER_IMG_SIZE, WORKER_IMG_SIZE), interpolation=cv2.INTER_AREA)
+        
+        return Image.fromarray(img_resized)
+    except Exception as e:
+        print(f"Warning: could not load {path}. Error: {e}. Skipping.")
+        return None
 # --- Датасет ---
 class NSFWDataset(Dataset):
     def __init__(self, filepaths, labels, transform=None, cache_ram=True):
         self.filepaths = filepaths
         self.labels = labels
         self.transform = transform
-        self.cache = {}
-        if not filepaths:
-            self.cache_ram = False
-            return
+        self.preloaded_images = []
+        self.cache_ram = cache_ram
 
-        estimated_ram_gb = (len(filepaths) * IMG_SIZE * IMG_SIZE * 3 * 1) / (1024 ** 3)
-        self.cache_ram = cache_ram and (estimated_ram_gb < 50)
-        if self.cache_ram and len(filepaths) > 0:
-            print(f"RAM caching for PIL Images is enabled. Estimated RAM usage for cache: {estimated_ram_gb:.2f} GB")
-        elif not self.cache_ram and cache_ram and len(filepaths) > 0:
-            print(f"RAM caching for PIL Images is DISABLED. Estimated RAM usage ({estimated_ram_gb:.2f} GB) exceeds limit or cache_ram was False.")
+        if self.cache_ram:
+            print("Starting to preload and cache resized images into RAM in parallel...")
+            num_workers = os.cpu_count() or 1
+            
+            # Используем initializer и initargs для передачи IMG_SIZE в каждый процесс
+            with multiprocessing.Pool(processes=num_workers,
+                                      initializer=_worker_init,
+                                      initargs=(IMG_SIZE,)) as pool:
+                
+                results_iterator = pool.imap(_load_and_resize_image, filepaths)
+                self.preloaded_images = list(tqdm(results_iterator, total=len(filepaths), desc="Caching resized images"))
+
+            # Подсчитываем, сколько изображений успешно загружено
+            successful_loads = sum(1 for img in self.preloaded_images if img is not None)
+            print(f"Finished caching. {successful_loads} images preloaded into RAM using {num_workers} processes.")
+
 
     def __len__(self):
         return len(self.filepaths)
-
     def __getitem__(self, idx):
-        if idx >= len(self.filepaths):
-            print(f"Error: NSFWDataset __getitem__ index {idx} out of bounds for length {len(self.filepaths)}")
-            if not self.filepaths:
-                placeholder_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='magenta')
-                if self.transform:
-                    placeholder_img = self.transform(placeholder_img)
-                return placeholder_img, torch.tensor(0.0, dtype=torch.float)
-            image_path = self.filepaths[0]
-            label = self.labels[0]
+        # 1. Получаем метку класса, здесь ничего не меняется.
+        label = self.labels[idx]
+        
+        # 2. Получаем базовое изображение (объект PIL.Image).
+        #    Этот блок кода вы уже поняли, он остается таким же.
+        if self.cache_ram:
+            # Берем уже измененное по размеру изображение из списка в ОЗУ
+            pil_img = self.preloaded_images[idx]
+            # Если при кэшировании файл оказался битым, создаем заглушку
+            if pil_img is None:
+                pil_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='red')
         else:
+            # Старая логика: читаем изображение с диска, если кэширование выключено
             image_path = self.filepaths[idx]
-            label = self.labels[idx]
-
-        if self.cache_ram and image_path in self.cache:
-            img = self.cache[image_path].copy()
-        else:
             try:
-                img = Image.open(image_path).convert('RGB')
-                if self.cache_ram:
-                    self.cache[image_path] = img.copy()
+                pil_img = Image.open(image_path).convert('RGB')
             except Exception:
-                placeholder_img_obj = None
-                if self.cache:
-                    valid_cached_keys = [k for k, v_img in self.cache.items() if v_img is not None]
-                    if valid_cached_keys:
-                        placeholder_img_obj = self.cache[valid_cached_keys[0]].copy()
+                pil_img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='red')
 
-                if placeholder_img_obj is None and self.filepaths:
-                    try:
-                        first_valid_path_idx = 0
-                        while first_valid_path_idx < len(self.filepaths):
-                            try:
-                                placeholder_img_obj = Image.open(self.filepaths[first_valid_path_idx]).convert('RGB')
-                                break
-                            except Exception:
-                                first_valid_path_idx +=1
-                        if placeholder_img_obj is None and first_valid_path_idx == len(self.filepaths):
-                             placeholder_img_obj = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color = 'red')
-                    except Exception:
-                         placeholder_img_obj = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color = 'red')
-
-                if placeholder_img_obj:
-                    img = placeholder_img_obj
-                else:
-                    img = Image.new('RGB', (IMG_SIZE, IMG_SIZE), color='red')
-
+        # 3. Применяем трансформации.
+        #    Этот блок полностью заменяется для работы с Albumentations.
         if self.transform:
-            img = self.transform(img)
+            # 3.1. Конвертируем PIL Image в Numpy Array.
+            #      Это ключевой шаг для совместимости с Albumentations.
+            numpy_img = np.array(pil_img)
+            
+            # 3.2. Применяем пайплайн трансформаций Albumentations.
+            #      Он принимает словарь и возвращает словарь.
+            transformed = self.transform(image=numpy_img)
+            
+            # 3.3. Извлекаем трансформированное изображение из словаря.
+            #      После ToTensorV2() это уже будет torch.Tensor.
+            tensor_img = transformed['image']
+        else:
+            # Если трансформации не заданы (маловероятно, но для полноты картины)
+            # Нужно вручную конвертировать PIL в Tensor
+            tensor_img = transforms.ToTensor()(pil_img)
 
-        return img, torch.tensor(label, dtype=torch.float)
+        # 4. Возвращаем тензор изображения и тензор метки.
+        return tensor_img, torch.tensor(label, dtype=torch.float)
+
+        
 
 # --- (The rest of your helper functions remain the same) ---
 # ...
@@ -763,7 +810,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
     params = {
         "base_model": trial.suggest_categorical("base_model", ["resnet18", "resnet34"]),
         "unfreeze_strategy": trial.suggest_categorical("unfreeze_strategy", ["fc_only", "all"]),
-        "n_fc_layers": trial.suggest_int("n_fc_layers", 1, 3, 4, 5, 6)
+        "n_fc_layers": trial.suggest_int("n_fc_layers", 1, 6)
     }
     for i in range(params["n_fc_layers"]):
         params[f"fc_units_l{i}"] = trial.suggest_int(f"fc_units_l{i}", 64, 1024, step=8)
@@ -796,7 +843,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
     num_cpus = os.cpu_count()
     MAX_RECOMMENDED_WORKERS_OPTUNA = 16
     if num_cpus is None:
-        optuna_num_workers = 4
+        optuna_num_workers = 4 
         print(f"Optuna Trial {trial.number}: Could not determine CPU count. Setting num_workers to {optuna_num_workers}.")
     else:
         optuna_num_workers = max(1, min(num_cpus // 2, MAX_RECOMMENDED_WORKERS_OPTUNA))
@@ -964,6 +1011,8 @@ def run_optuna_study():
         print("Optuna study completed, but no best trial found (possibly all trials failed or were pruned before completion or returned None).")
         return None
 
+
+
 # --- Основная функция ---
 
 def main():
@@ -1069,14 +1118,15 @@ def main():
         train_dataset, batch_size=BATCH_SIZE, sampler=sampler, shuffle=shuffle_train,
         num_workers=final_num_workers, pin_memory=True if DEVICE.type == 'cuda' else False,
         persistent_workers=True if final_num_workers > 0 and DEVICE.type == 'cuda' else False,
-        drop_last=drop_last_final_train
+        drop_last=drop_last_final_train,
+        prefetch_factor=2
     )
 
     test_loader_num_workers = final_num_workers
     test_loader = []
     if len(test_dataset) > 0:
         test_loader = DataLoader(
-            test_dataset, batch_size=BATCH_SIZE, shuffle=False,
+            test_dataset, batch_size=BATCH_SIZE, shuffle=False, prefetch_factor=2,
             num_workers=test_loader_num_workers, pin_memory=True if DEVICE.type == 'cuda' else False,
             persistent_workers=True if test_loader_num_workers > 0 and DEVICE.type == 'cuda' else False
         )
