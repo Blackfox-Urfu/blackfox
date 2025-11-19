@@ -19,7 +19,7 @@ CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 USER_AGENT = os.getenv('USER_AGENT')
 
 
-SFW_SUBREDDITS = []
+SFW_SUBREDDITS = ['streetphotography','photoshopbattles','selfie','SelfieOver25']
 NSFW_SUBREDDITS = [
     'gonwild',
     'ratemynudebody',
@@ -404,7 +404,7 @@ NSFW_SAVE_PATH = "data/reddit/nsfw_images"
 os.makedirs(SFW_SAVE_PATH, exist_ok=True)
 os.makedirs(NSFW_SAVE_PATH, exist_ok=True)
 
-DOWNLOAD_LIMIT_PER_SUBREDDIT = 5000
+DOWNLOAD_LIMIT_PER_SUBREDDIT = 100000
 MAX_WORKERS = 15
 DOWNLOAD_TIMEOUT = 25
 EARLY_SKIP_THRESHOLD = 50

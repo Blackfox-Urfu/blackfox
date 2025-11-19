@@ -71,13 +71,13 @@ warnings.filterwarnings("ignore", "(?s).*Palette images with Transparency.*")
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {DEVICE}")
 
-PERFORM_OPTUNA_SEARCH = False
+PERFORM_OPTUNA_SEARCH = True
 IMG_SIZE = 256
 BATCH_SIZE = 512
 EPOCHS = 7
 PATIENCE = 3
-OPTUNA_N_TRIALS = 5
-OPTUNA_EPOCHS = 3
+OPTUNA_N_TRIALS = 10
+OPTUNA_EPOCHS = 4
 OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
 OPTUNA_DATASET_FRACTION = 3 / 5
 FINAL_TEST_SET_FRACTION = 0.2
