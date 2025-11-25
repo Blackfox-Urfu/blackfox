@@ -20,6 +20,8 @@ import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image, UnidentifiedImageError
 import pickle
+import hashlib
+import asyncio
 
 # --- НОВЫЙ ИМПОРТ для метрик ---
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -89,6 +91,12 @@ logger = logging.getLogger(__name__)
 
 # --- Инициализация FastAPI и Метрик ---
 app = FastAPI(title="Black-Fox ML API")
+
+# --- Настройки кэша и ограничений ---
+NSFW_CACHE = {} 
+# Ограничиваем одновременную работу с NSFW до 1 потока.
+# Это спасет память и CPU.
+nsfw_semaphore = asyncio.Semaphore(1)
 
 # --- НОВЫЙ БЛОК: Настройка метрик Prometheus ---
 PREDICTION_COUNTER = Counter(
@@ -384,32 +392,71 @@ async def classify_text_endpoint(request: TextRequest):
 
 @app.post("/api/classify_nsfw_image/", response_model=NsfwPredictionResponse)
 async def classify_nsfw_image_endpoint(file: UploadFile = File(...)):
-    if not nsfw_image_classifier.model: raise HTTPException(status_code=503, detail="NSFW model not available.")
-    try:
-        logger.info(f"Classifying NSFW. Filename: {file.filename}")
-        contents = await file.read()
-        if not contents: raise HTTPException(status_code=400, detail="Empty file")
-        
-        img = Image.open(io.BytesIO(contents)).convert('RGB')
-        img_tensor = nsfw_image_classifier.transform(img).unsqueeze(0).to(nsfw_image_classifier.device)
-        
-        # МОНИТОРИНГ
-        with PREDICTION_LATENCY.labels(model_type="nsfw").time():
-            with torch.no_grad():
-                logits = nsfw_image_classifier.model(img_tensor)
-                prob_nsfw = torch.sigmoid(logits).item()
-        
-        is_nsfw = prob_nsfw > nsfw_image_classifier.threshold
-        PREDICTION_COUNTER.labels(model_type="nsfw", result="nsfw" if is_nsfw else "sfw").inc()
-        
-        logger.info(f"NSFW result: is_nsfw={is_nsfw}, prob={prob_nsfw:.4f}")
-        return NsfwPredictionResponse(prediction_prob_nsfw=prob_nsfw, is_nsfw=is_nsfw, confidence=prob_nsfw if is_nsfw else (1 - prob_nsfw))
-    except UnidentifiedImageError:
-        logger.warning(f"Could not identify image format for file: {file.filename}")
-        raise HTTPException(status_code=400, detail="Invalid or unsupported image format.")
-    except Exception as e: 
-        logger.error(f"Error in NSFW endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    if not nsfw_image_classifier.model:
+        raise HTTPException(status_code=503, detail="NSFW model not available.")
+
+    # ВАЖНО: СЕМАФОР ДОЛЖЕН БЫТЬ ТУТ, ДО ЧТЕНИЯ ФАЙЛА
+    async with nsfw_semaphore:
+        try:
+            contents = await file.read() # Читаем только когда подошла очередь
+            if not contents:
+                raise HTTPException(status_code=400, detail="Empty file")
+
+            # Считаем хэш
+            file_hash = hashlib.md5(contents).hexdigest()
+
+            # Проверяем кэш
+            if file_hash in NSFW_CACHE:
+                logger.info(f"Cache HIT for {file.filename} ({file_hash})")
+                return NSFW_CACHE[file_hash]
+
+            # 4. Если в кэше нет - запускаем нейросеть
+            logger.info(f"Processing NSFW. Filename: {file.filename} Hash: {file_hash}")
+            
+            loop = asyncio.get_event_loop()
+            
+            def process_image():
+                # Конвертация и инференс - тяжелые операции
+                try:
+                    img = Image.open(io.BytesIO(contents)).convert('RGB')
+                    img_tensor = nsfw_image_classifier.transform(img).unsqueeze(0).to(nsfw_image_classifier.device)
+                    
+                    with torch.no_grad():
+                        logits = nsfw_image_classifier.model(img_tensor)
+                        prob_nsfw = torch.sigmoid(logits).item()
+                    return prob_nsfw
+                except Exception as e:
+                    logger.error(f"Error inside processing thread: {e}")
+                    raise e
+
+            # Замер времени
+            with PREDICTION_LATENCY.labels(model_type="nsfw").time():
+                prob_nsfw = await loop.run_in_executor(None, process_image)
+
+            is_nsfw = prob_nsfw > nsfw_image_classifier.threshold
+            PREDICTION_COUNTER.labels(model_type="nsfw", result="nsfw" if is_nsfw else "sfw").inc()
+
+            response_data = NsfwPredictionResponse(
+                prediction_prob_nsfw=prob_nsfw,
+                is_nsfw=is_nsfw,
+                confidence=prob_nsfw if is_nsfw else (1 - prob_nsfw)
+            )
+
+            logger.info(f"NSFW result: is_nsfw={is_nsfw}, prob={prob_nsfw:.4f}")
+
+            # 5. Сохраняем результат
+            if len(NSFW_CACHE) > 2000: # Лимит кэша
+                NSFW_CACHE.clear()
+            NSFW_CACHE[file_hash] = response_data
+            
+            return response_data
+
+        except UnidentifiedImageError:
+            logger.warning(f"Could not identify image format for file: {file.filename}")
+            raise HTTPException(status_code=400, detail="Invalid or unsupported image format.")
+        except Exception as e:
+            logger.error(f"Error in NSFW endpoint: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
@@ -430,7 +477,8 @@ if __name__ == "__main__":
         "main:app", 
         host="0.0.0.0", 
         port=8000, 
-        reload=True, 
+        reload=False,
+        workers=1, 
         log_config=None,
         ssl_keyfile="./key.pem",      # Укажите путь к вашему локальному ключу
         ssl_certfile="./cert.pem" # Укажите путь к вашему локальному сертификату
