@@ -3,671 +3,668 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Black-Fox ML Classification</title>
+    <title>BlackFox API | AI Content Analysis</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --primary: #00a8ff;
+            --secondary: #2c3e50;
+            --accent: #e84118;
+            --text: #f5f6fa;
+            --bg-overlay: rgba(0, 0, 0, 0.7);
+            --card-bg: rgba(255, 255, 255, 0.95);
         }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #090a0f;
+            color: #333;
             min-height: 100vh;
-            padding: 20px;
+            overflow-x: hidden;
         }
 
-        .container {
+        /* --- ASCII Canvas Background --- */
+        #ascii-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background: linear-gradient(180deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+        }
+
+        /* --- Main Layout --- */
+        .wrapper {
             max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
+            margin: 40px auto;
+            padding: 0 20px;
+            position: relative;
         }
 
-        .header {
-            background: #2c3e50;
+        /* --- Language Selector --- */
+        .lang-selector {
+            position: absolute;
+            top: 0;
+            right: 20px;
+            z-index: 100;
+        }
+
+        .lang-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
             color: white;
-            padding: 30px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 5px;
+            margin-left: 5px;
+            transition: 0.3s;
+        }
+
+        .lang-btn:hover, .lang-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        header {
             text-align: center;
-        }
-
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            opacity: 0.8;
-            font-size: 1.1em;
-        }
-
-        .tabs {
-            display: flex;
-            background: #34495e;
-            border-bottom: 1px solid #ddd;
-        }
-
-        .tab {
-            padding: 15px 30px;
-            background: none;
-            border: none;
+            margin-bottom: 40px;
             color: white;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            margin-top: 40px;
+        }
+
+        header h1 { font-size: 3em; margin-bottom: 10px; letter-spacing: 2px; }
+        header p { font-size: 1.2em; opacity: 0.8; }
+
+        /* --- Navigation --- */
+        .nav-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .nav-btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.2);
+            color: white;
+            cursor: pointer;
+            border-radius: 30px;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+
+        .nav-btn:hover, .nav-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 168, 255, 0.4);
+        }
+
+        /* --- Content Cards --- */
+        .content-section {
+            display: none;
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            animation: slideUp 0.5s ease;
+        }
+
+        .content-section.active { display: block; }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- Documentation Styles --- */
+        .doc-block { margin-bottom: 40px; border-bottom: 1px solid #eee; padding-bottom: 30px; }
+        .doc-block:last-child { border: none; }
+        
+        h2 { color: var(--secondary); margin-bottom: 20px; font-size: 1.8em; }
+        h3 { color: var(--primary); margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        
+        .badge { 
+            font-size: 0.6em; padding: 4px 8px; border-radius: 4px; color: white; vertical-align: middle; 
+        }
+        .badge.post { background: #27ae60; }
+
+        .endpoint-url {
+            background: #f1f2f6;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            color: #2c3e50;
+            border-left: 4px solid var(--primary);
+            margin-bottom: 15px;
+            word-break: break-all;
+        }
+
+        pre {
+            background: #2d3436;
+            color: #a4b0be;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Consolas', monospace;
+            margin: 10px 0;
+        }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .param-table th, .param-table td { padding: 10px; border: 1px solid #dfe6e9; text-align: left; }
+        .param-table th { background: #f1f2f6; }
+
+        /* --- Demo Interface Styles --- */
+        .demo-grid {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 30px;
+        }
+
+        .demo-sidebar button {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 10px;
+            border: none;
+            background: transparent;
+            text-align: left;
             font-size: 16px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            border-bottom: 3px solid transparent;
+            border-radius: 8px;
+            color: #555;
+            transition: 0.3s;
         }
 
-        .tab:hover {
-            background: rgba(255,255,255,0.1);
+        .demo-sidebar button.active {
+            background: var(--primary);
+            color: white;
+            font-weight: bold;
         }
 
-        .tab.active {
-            background: rgba(255,255,255,0.2);
-            border-bottom-color: #3498db;
-        }
+        .demo-panel { display: none; }
+        .demo-panel.active { display: block; }
 
-        .tab-content {
-            display: none;
-            padding: 30px;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        .form-group {
+        .upload-area {
+            border: 2px dashed #bdc3c7;
+            padding: 40px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: 0.3s;
             margin-bottom: 20px;
         }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #2c3e50;
-        }
-
-        textarea, input[type="text"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-            resize: vertical;
-            min-height: 120px;
-        }
-
-        textarea:focus, input[type="text"]:focus {
-            outline: none;
-            border-color: #3498db;
-        }
-
-        .file-upload {
-            border: 2px dashed #e0e0e0;
-            border-radius: 8px;
-            padding: 30px;
-            text-align: center;
-            cursor: pointer;
-            transition: border-color 0.3s ease;
-        }
-
-        .file-upload:hover {
-            border-color: #3498db;
-        }
-
-        .file-upload.dragover {
-            border-color: #3498db;
-            background: rgba(52, 152, 219, 0.05);
-        }
-
-        .btn {
-            background: #3498db;
+        .upload-area:hover { border-color: var(--primary); background: rgba(0, 168, 255, 0.05); }
+        
+        textarea { width: 100%; padding: 15px; border: 2px solid #bdc3c7; border-radius: 10px; min-height: 120px; margin-bottom: 20px; font-family: inherit; }
+        
+        .action-btn {
+            background: var(--primary);
             color: white;
             border: none;
-            padding: 15px 30px;
+            padding: 15px 40px;
             border-radius: 8px;
-            font-size: 16px;
+            font-size: 1.1em;
             cursor: pointer;
-            transition: all 0.3s ease;
-            font-weight: 600;
+            transition: 0.3s;
+            width: 100%;
         }
+        .action-btn:hover { background: #0097e6; }
 
-        .btn:hover {
-            background: #2980b9;
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        }
-
-        .btn:disabled {
-            background: #bdc3c7;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .result {
-            margin-top: 30px;
+        .result-box {
+            margin-top: 20px;
             padding: 20px;
-            border-radius: 8px;
-            background: #f8f9fa;
-            border-left: 4px solid #3498db;
-        }
-
-        .result.ad {
-            border-left-color: #e74c3c;
-            background: #fdf2f2;
-        }
-
-        .result.not-ad {
-            border-left-color: #27ae60;
-            background: #f2fdf2;
-        }
-
-        .result.nsfw {
-            border-left-color: #e67e22;
-            background: #fef9f2;
-        }
-        
-        /* Добавлен класс для безопасного контента */
-        .result.safe {
-             border-left-color: #27ae60;
-            background: #f2fdf2;
-        }
-
-        .probability-bar {
-            height: 20px;
-            background: #ecf0f1;
             border-radius: 10px;
-            margin: 10px 0;
+            display: none;
+        }
+        .result-box.safe, .result-box.not-ad { background: #dff9fb; border-left: 5px solid #22a6b3; }
+        .result-box.nsfw, .result-box.ad { background: #ffdd59; border-left: 5px solid #eb4d4b; }
+
+        .progress {
+            background: #dfe6e9;
+            height: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
             overflow: hidden;
         }
+        .progress-bar { height: 100%; transition: width 0.5s; }
 
-        .probability-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #3498db, #2980b9);
-            border-radius: 10px;
-            transition: width 0.5s ease;
-        }
-
-        .probability-fill.ad {
-            background: linear-gradient(90deg, #e74c3c, #c0392b);
-        }
-        
-        .probability-fill.not-ad {
-            background: linear-gradient(90deg, #27ae60, #2ecc71);
-        }
-
-        .probability-fill.nsfw {
-            background: linear-gradient(90deg, #e67e22, #d35400);
-        }
-        
-        .probability-fill.safe {
-            background: linear-gradient(90deg, #27ae60, #2ecc71);
-        }
-
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 20px;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 8px;
-        }
-
-        .status-online {
-            background: #27ae60;
-        }
-
-        .status-offline {
-            background: #e74c3c;
-        }
-
-        .health-status {
-            margin-top: 20px;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 8px;
-        }
-
-        .model-status {
-            display: flex;
-            flex-direction: column; /* Изменено для лучшего отображения на мобильных */
-            gap: 10px; /* Добавлен отступ между элементами */
-        }
-
+        /* Mobile */
         @media (max-width: 768px) {
-            .container {
-                margin: 10px;
-                border-radius: 10px;
-            }
-            
-            .header h1 {
-                font-size: 2em;
-            }
-            
-            .tabs {
-                flex-direction: column;
-            }
-            
-            .tab {
-                padding: 12px 20px;
-            }
+            .demo-grid { grid-template-columns: 1fr; }
+            .nav-btn { padding: 10px 20px; font-size: 14px; }
+            header h1 { font-size: 2em; }
+            .lang-selector { top: 10px; right: 10px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>Black-Fox ML Classification</h1>
-            <p>Определение рекламного контента и NSFW изображений</p>
+    <canvas id="ascii-canvas"></canvas>
+
+    <div class="wrapper">
+        <div class="lang-selector">
+            <button class="lang-btn active" onclick="changeLang('ru')">RU</button>
+            <button class="lang-btn" onclick="changeLang('en')">EN</button>
+            <button class="lang-btn" onclick="changeLang('zh')">中文</button>
         </div>
 
-        <!-- ИЗМЕНЕНИЕ 1: Порядок кнопок изменен, класс 'active' перенесен на NSFW -->
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('nsfw')">NSFW изображения</button>
-            <button class="tab" onclick="switchTab('multimodal')">Мультимодальный анализ</button>
-            <button class="tab" onclick="switchTab('text-only')">Только текст</button>
-            <button class="tab" onclick="switchTab('status')">Статус системы</button>
+        <header>
+            <h1 data-i18n="title">BLACKFOX API</h1>
+            <p data-i18n="subtitle">Нейросетевой анализ контента: детекция рекламы и порнографических материалов</p>
+        </header>
+
+        <div class="nav-container">
+            <button class="nav-btn active" onclick="setView('docs')" data-i18n="nav_docs">📖 Документация</button>
+            <button class="nav-btn" onclick="setView('demo')" data-i18n="nav_demo">🚀 Песочница (Demo)</button>
         </div>
 
-        <!-- ИЗМЕНЕНИЕ 2: Порядок контента изменен, класс 'active' перенесен на NSFW -->
-        <!-- NSFW анализ -->
-        <div id="nsfw" class="tab-content active">
-            <h2>NSFW анализ изображений</h2>
-            <p>Определение неприемлемого контента (Блядот) на изображениях</p>
-            
-            <div class="form-group">
-                <label>Изображение для анализа:</label>
-                <div class="file-upload" id="nsfw-upload">
-                    <p>Перетащите изображение сюда или кликните для выбора</p>
-                    <input type="file" id="nsfw-image" accept="image/*" style="display: none;">
-                    <div id="nsfw-preview" style="margin-top: 10px;"></div>
+        <!-- DOCUMENTATION SECTION -->
+        <div id="view-docs" class="content-section active">
+            <div class="doc-block">
+                <h2 data-i18n="about_title">О проекте</h2>
+                <p data-i18n="about_desc">В основе проекта лежит мощный API для анализа контента. Мы используем эффективные алгоритмы машинного обучения (TF-IDF + нейронные сети для текста, ResNet для изображений) для точной и быстрой классификации.</p>
+                <p style="margin-top: 10px;">
+                    <span data-i18n="example_usage">Пример использования:</span> 
+                    <a href="https://github.com/Blackfox-Urfu/Telegram-ad-block-extension" target="_blank" style="color: var(--primary); font-weight: bold; text-decoration: none;">
+                        Telegram Ad Block Extension ↗
+                    </a>
+                </p>
+            </div>
+
+            <div class="doc-block">
+                <h3><span class="badge post">POST</span> /api/classify_message/</h3>
+                <div class="endpoint-url">https://blackfoxus.ru/api/classify_message/</div>
+                <p data-i18n="ep1_desc">Мультимодальный анализ: проверяет текст и/или картинку на наличие рекламы.</p>
+                <table class="param-table">
+                    <tr><th data-i18n="tbl_param">Параметр</th><th data-i18n="tbl_type">Тип</th><th data-i18n="tbl_desc">Описание</th></tr>
+                    <tr><td>text</td><td>string</td><td data-i18n="ep1_p1">Текст сообщения</td></tr>
+                    <tr><td>image</td><td>file</td><td data-i18n="ep1_p2">Файл изображения (jpg, png, webp)</td></tr>
+                </table>
+                <pre>curl -X POST "https://blackfoxus.ru/api/classify_message/" \
+-F "text=Super offer!" \
+-F "image=@photo.jpg"</pre>
+            </div>
+
+            <div class="doc-block">
+                <h3><span class="badge post">POST</span> /api/classify_nsfw_image/</h3>
+                <div class="endpoint-url">https://blackfoxus.ru/api/classify_nsfw_image/</div>
+                <p data-i18n="ep2_desc">Проверка изображения на наличие порнографических материалов.</p>
+                <pre>curl -X POST "https://blackfoxus.ru/api/classify_nsfw_image/" \
+-F "file=@image.jpg"</pre>
+            </div>
+
+            <div class="doc-block">
+                <h3><span class="badge post">POST</span> /api/classify_text/</h3>
+                <div class="endpoint-url">https://blackfoxus.ru/api/classify_text/</div>
+                <p data-i18n="ep3_desc">Быстрый анализ только текстовой части.</p>
+                <pre>curl -X POST "https://blackfoxus.ru/api/classify_text/" \
+-H "Content-Type: application/json" \
+-d '{"text": "Buy our services"}'</pre>
+            </div>
+        </div>
+
+        <!-- DEMO SECTION -->
+        <div id="view-demo" class="content-section">
+            <div class="demo-grid">
+                <div class="demo-sidebar">
+                    <button class="active" onclick="setDemoTab('tab-nsfw')" data-i18n="tab_nsfw">🔞 Детекция порнографии</button>
+                    <button onclick="setDemoTab('tab-multi')" data-i18n="tab_multi">🖼️ + 📝 Реклама (Мульти)</button>
+                    <button onclick="setDemoTab('tab-text')" data-i18n="tab_text">📝 Реклама (Текст)</button>
+                    <button onclick="checkHealth()" data-i18n="tab_status">❤️ Статус сервера</button>
+                </div>
+
+                <div class="demo-content">
+                    <!-- NSFW TAB -->
+                    <div id="tab-nsfw" class="demo-panel active">
+                        <h2 data-i18n="head_nsfw">Проверка на порнографию</h2>
+                        <div class="upload-area" id="drop-nsfw">
+                            <p data-i18n="drop_text">Нажмите или перетащите изображение сюда</p>
+                            <input type="file" id="file-nsfw" hidden accept="image/*">
+                            <div id="preview-nsfw"></div>
+                        </div>
+                        <button class="action-btn" onclick="runNSFW()" data-i18n="btn_check">Проверить</button>
+                        <div id="res-nsfw" class="result-box"></div>
+                    </div>
+
+                    <!-- MULTIMODAL TAB -->
+                    <div id="tab-multi" class="demo-panel">
+                        <h2 data-i18n="head_multi">Поиск рекламы (Текст + Фото)</h2>
+                        <textarea id="text-multi" placeholder="Текст поста..."></textarea>
+                        <div class="upload-area" id="drop-multi">
+                            <p data-i18n="drop_opt">Прикрепить изображение (необязательно)</p>
+                            <input type="file" id="file-multi" hidden accept="image/*">
+                            <div id="preview-multi"></div>
+                        </div>
+                        <button class="action-btn" onclick="runMulti()" data-i18n="btn_analyze">Анализировать</button>
+                        <div id="res-multi" class="result-box"></div>
+                    </div>
+
+                    <!-- TEXT ONLY TAB -->
+                    <div id="tab-text" class="demo-panel">
+                        <h2 data-i18n="head_text">Поиск рекламы (Только текст)</h2>
+                        <textarea id="text-only" placeholder="Введите текст сообщения..."></textarea>
+                        <button class="action-btn" onclick="runText()" data-i18n="btn_analyze">Анализировать</button>
+                        <div id="res-text" class="result-box"></div>
+                    </div>
                 </div>
             </div>
-
-            <button class="btn" onclick="analyzeNSFW()">Анализировать изображение</button>
-
-            <div class="loading" id="nsfw-loading">
-                <div class="spinner"></div>
-                <p>Анализируем изображение...</p>
-            </div>
-
-            <div class="result" id="nsfw-result" style="display: none;"></div>
-        </div>
-
-        <!-- Мультимодальный анализ -->
-        <div id="multimodal" class="tab-content">
-            <h2>Мультимодальный анализ контента</h2>
-            <p>Анализ текста и изображения для определения рекламного контента</p>
-            
-            <div class="form-group">
-                <label for="multimodal-text">Текст сообщения:</label>
-                <textarea id="multimodal-text" placeholder="Введите текст для анализа..."></textarea>
-            </div>
-
-            <div class="form-group">
-                <label>Изображение (опционально):</label>
-                <div class="file-upload" id="multimodal-upload">
-                    <p>Перетащите изображение сюда или кликните для выбора</p>
-                    <input type="file" id="multimodal-image" accept="image/*" style="display: none;">
-                    <div id="multimodal-preview" style="margin-top: 10px;"></div>
-                </div>
-            </div>
-
-            <button class="btn" onclick="analyzeMultimodal()">Анализировать</button>
-
-            <div class="loading" id="multimodal-loading">
-                <div class="spinner"></div>
-                <p>Анализируем контент...</p>
-            </div>
-
-            <div class="result" id="multimodal-result" style="display: none;"></div>
-        </div>
-
-        <!-- Только текст -->
-        <div id="text-only" class="tab-content">
-            <h2>Анализ текста</h2>
-            <p>Определение рекламного контента по тексту</p>
-            
-            <div class="form-group">
-                <label for="text-only-input">Текст для анализа:</label>
-                <textarea id="text-only-input" placeholder="Введите текст для анализа..."></textarea>
-            </div>
-
-            <button class="btn" onclick="analyzeTextOnly()">Анализировать текст</button>
-
-            <div class="loading" id="text-loading">
-                <div class="spinner"></div>
-                <p>Анализируем текст...</p>
-            </div>
-
-            <div class="result" id="text-result" style="display: none;"></div>
-        </div>
-
-        <!-- Статус системы -->
-        <div id="status" class="tab-content">
-            <h2>Статус системы</h2>
-            <p>Информация о состоянии ML моделей и сервера</p>
-            
-            <div class="health-status">
-                <h3>Состояние сервера:</h3>
-                <div id="server-status">Проверка...</div>
-                
-                <h3 style="margin-top: 20px;">Состояние моделей:</h3>
-                <div class="model-status" id="model-status">
-                    Загрузка...
-                </div>
-            </div>
-
-            <button class="btn" onclick="checkHealth()">Обновить статус</button>
         </div>
     </div>
 
+    <!-- ANIMATION SCRIPT -->
     <script>
-        // Конфигурация
-        const API_BASE_URL = window.location.origin; // Автоматически использует домен, с которого загружена страница
+        const canvas = document.getElementById('ascii-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let w, h;
+        const fontSize = 14;
+        const chars = " .~+o*^";
+        
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+            ctx.font = `${fontSize}px monospace`;
+        }
+        window.addEventListener('resize', resize);
+        resize();
 
-        // Инициализация
+        let time = 0;
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+            const cols = Math.ceil(w / (fontSize * 0.6));
+            const rows = 30;
+            for (let y = 0; y < rows; y++) {
+                let line = "";
+                const baseY = (h / 2) + (y * 20); 
+                const alpha = 0.1 + (y / rows) * 0.6;
+                ctx.fillStyle = `rgba(130, 204, 221, ${alpha})`;
+                for (let x = 0; x < cols; x++) {
+                    const noise = Math.sin(x * 0.05 + time + y * 0.5) + Math.sin(x * 0.1 - time * 0.5) * 0.5;
+                    let charIndex = Math.floor(((noise + 1.5) / 3) * chars.length);
+                    if(charIndex < 0) charIndex = 0;
+                    if(charIndex >= chars.length) charIndex = chars.length - 1;
+                    line += chars[charIndex];
+                }
+                ctx.fillText(line, 0, baseY + Math.sin(time + y)*15);
+            }
+            time += 0.02;
+            requestAnimationFrame(draw);
+        }
+        draw();
+    </script>
+
+    <!-- TRANSLATIONS & LOGIC -->
+    <script>
+        const API_URL = window.location.origin.includes('localhost') ? 'http://localhost:8000' : window.location.origin;
+
+        const translations = {
+            ru: {
+                title: "BLACKFOX API",
+                subtitle: "Нейросетевой анализ контента: детекция рекламы и порнографических материалов",
+                nav_docs: "📖 Документация",
+                nav_demo: "🚀 Песочница (Demo)",
+                about_title: "О проекте",
+                about_desc: "В основе проекта лежит мощный API для анализа контента. Мы используем эффективные алгоритмы машинного обучения (TF-IDF + нейронные сети для текста, ResNet для изображений) для точной и быстрой классификации.",
+                example_usage: "Пример использования:",
+                ep1_desc: "Мультимодальный анализ: проверяет текст и/или картинку на наличие рекламы.",
+                tbl_param: "Параметр", tbl_type: "Тип", tbl_desc: "Описание",
+                ep1_p1: "Текст сообщения", ep1_p2: "Файл изображения (jpg, png, webp)",
+                ep2_desc: "Проверка изображения на наличие порнографических материалов.",
+                ep3_desc: "Быстрый анализ только текстовой части.",
+                tab_nsfw: "🔞 Детекция порнографии",
+                tab_multi: "🖼️ + 📝 Реклама (Мульти)",
+                tab_text: "📝 Реклама (Текст)",
+                tab_status: "❤️ Статус сервера",
+                head_nsfw: "Проверка на порнографию",
+                drop_text: "Нажмите или перетащите изображение сюда",
+                btn_check: "Проверить",
+                head_multi: "Поиск рекламы (Текст + Фото)",
+                ph_text: "Текст поста...",
+                drop_opt: "Прикрепить изображение (необязательно)",
+                btn_analyze: "Анализировать",
+                head_text: "Поиск рекламы (Только текст)",
+                ph_text_only: "Введите текст сообщения...",
+                res_analysis: "Анализ...",
+                res_nsfw_yes: "ОБНАРУЖЕНА ПОРНОГРАФИЯ", res_nsfw_no: "КОНТЕНТ БЕЗОПАСЕН",
+                res_ad_yes: "ЭТО РЕКЛАМА", res_ad_no: "НЕ РЕКЛАМА",
+                res_prob: "Вероятность",
+                alert_file: "Выберите файл!",
+                alert_input: "Нужен текст или фото!",
+                server_ok: "Статус: healthy",
+                server_err: "Сервер недоступен"
+            },
+            en: {
+                title: "BLACKFOX API",
+                subtitle: "Neural network content analysis: Ad detection & Pornography",
+                nav_docs: "📖 Documentation",
+                nav_demo: "🚀 Sandbox (Demo)",
+                about_title: "About",
+                about_desc: "The project is based on a powerful content analysis API. We use efficient machine learning algorithms (TF-IDF + Neural Networks for text, ResNet for images) for accurate and fast classification.",
+                example_usage: "Usage example:",
+                ep1_desc: "Multimodal analysis: checks text and/or image for advertising.",
+                tbl_param: "Parameter", tbl_type: "Type", tbl_desc: "Description",
+                ep1_p1: "Message text", ep1_p2: "Image file (jpg, png, webp)",
+                ep2_desc: "Checking image for pornographic content.",
+                ep3_desc: "Fast analysis of text part only.",
+                tab_nsfw: "🔞 Pornography Analysis",
+                tab_multi: "🖼️ + 📝 Ads (Multi)",
+                tab_text: "📝 Ads (Text)",
+                tab_status: "❤️ Server Status",
+                head_nsfw: "Pornography Check",
+                drop_text: "Click or drop image here",
+                btn_check: "Check",
+                head_multi: "Ad Detection (Text + Photo)",
+                ph_text: "Post text...",
+                drop_opt: "Attach image (optional)",
+                btn_analyze: "Analyze",
+                head_text: "Ad Detection (Text only)",
+                ph_text_only: "Enter message text...",
+                res_analysis: "Analyzing...",
+                res_nsfw_yes: "PORNOGRAPHY DETECTED", res_nsfw_no: "CONTENT SAFE",
+                res_ad_yes: "ADVERTISEMENT", res_ad_no: "NOT AD",
+                res_prob: "Probability",
+                alert_file: "Select a file!",
+                alert_input: "Text or photo required!",
+                server_ok: "Status: healthy",
+                server_err: "Server unavailable"
+            },
+            zh: {
+                title: "BLACKFOX API",
+                subtitle: "神经网络内容分析：广告检测与色情内容",
+                nav_docs: "📖 文档",
+                nav_demo: "🚀 沙盒 (演示)",
+                about_title: "关于项目",
+                about_desc: "该项目基于强大的内容分析 API。我们使用高效的机器学习算法（用于文本的 TF-IDF + 神经网络，用于图像的 ResNet）进行精确且快速的分类。",
+                example_usage: "使用示例：",
+                ep1_desc: "多模态分析：检查文本和/或图像是否存在广告。",
+                tbl_param: "参数", tbl_type: "类型", tbl_desc: "描述",
+                ep1_p1: "消息文本", ep1_p2: "图像文件 (jpg, png, webp)",
+                ep2_desc: "检查图像是否存在色情内容。",
+                ep3_desc: "仅快速分析文本部分。",
+                tab_nsfw: "🔞 色情内容分析",
+                tab_multi: "🖼️ + 📝 广告 (多模态)",
+                tab_text: "📝 广告 (文本)",
+                tab_status: "❤️ 服务器状态",
+                head_nsfw: "色情内容检查",
+                drop_text: "点击或拖放图像到此处",
+                btn_check: "检查",
+                head_multi: "广告检测 (文本 + 照片)",
+                ph_text: "帖子文本...",
+                drop_opt: "附加图像 (可选)",
+                btn_analyze: "分析",
+                head_text: "广告检测 (仅文本)",
+                ph_text_only: "输入消息文本...",
+                res_analysis: "分析中...",
+                res_nsfw_yes: "检测到色情内容", res_nsfw_no: "内容安全",
+                res_ad_yes: "这是广告", res_ad_no: "非广告",
+                res_prob: "概率",
+                alert_file: "请选择文件！",
+                alert_input: "需要文本或照片！",
+                server_ok: "状态：正常",
+                server_err: "服务器不可用"
+            }
+        };
+
+        let curLang = 'ru';
+
+        function changeLang(lang) {
+            curLang = lang;
+            document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector(`button[onclick="changeLang('${lang}')"]`).classList.add('active');
+
+            const t = translations[lang];
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if(t[key]) el.innerHTML = t[key];
+            });
+
+            // Update placeholders
+            document.getElementById('text-multi').placeholder = t.ph_text;
+            document.getElementById('text-only').placeholder = t.ph_text_only;
+        }
+
+        // Initial Load
         document.addEventListener('DOMContentLoaded', function() {
             initializeFileUploads();
             checkHealth();
-            // Устанавливаем API_BASE_URL, если он не был определен автоматически (например, при открытии локального файла)
-            if (!API_BASE_URL.startsWith('http')) {
-                console.warn("Could not determine API_BASE_URL automatically. Falling back to default. Please replace 'your-server-domain.com'.");
-                API_BASE_URL = 'https://blackfoxus.ru:443'; // Замените на ваш домен как запасной вариант
-            }
+            changeLang('ru'); // Default
         });
 
-        // Переключение вкладок
-        function switchTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-
-            document.getElementById(tabName).classList.add('active');
-            // event.target - это элемент, по которому кликнули
-            const clickedButton = event.target;
-            clickedButton.classList.add('active');
+        // UI Logic
+        function setView(viewId) {
+            document.querySelectorAll('.content-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById('view-' + viewId).classList.add('active');
+            event.target.classList.add('active');
         }
 
-        // Инициализация загрузки файлов
-        function initializeFileUploads() {
-            // Мультимодальная загрузка
-            setupUpload('multimodal-upload', 'multimodal-image', 'multimodal-preview');
-            // NSFW загрузка
-            setupUpload('nsfw-upload', 'nsfw-image', 'nsfw-preview');
+        function setDemoTab(tabId) {
+            document.querySelectorAll('.demo-panel').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.demo-sidebar button').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.target.classList.add('active');
         }
 
-        function setupUpload(uploadId, inputId, previewId) {
-            const uploadArea = document.getElementById(uploadId);
-            const fileInput = document.getElementById(inputId);
+        function initUpload(areaId, inputId, previewId) {
+            const area = document.getElementById(areaId);
+            const input = document.getElementById(inputId);
             const preview = document.getElementById(previewId);
 
-            uploadArea.addEventListener('click', () => fileInput.click());
+            area.onclick = () => input.click();
+            input.onchange = () => showPreview(input.files[0], preview);
             
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, preventDefaults, false);
-            });
-
-            function preventDefaults(e) {
+            area.ondragover = (e) => { e.preventDefault(); area.style.borderColor = '#00a8ff'; };
+            area.ondragleave = () => area.style.borderColor = '#bdc3c7';
+            area.ondrop = (e) => {
                 e.preventDefault();
-                e.stopPropagation();
-            }
-
-            uploadArea.addEventListener('dragover', () => uploadArea.classList.add('dragover'));
-            uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
-
-            uploadArea.addEventListener('drop', (e) => {
-                uploadArea.classList.remove('dragover');
-                if (e.dataTransfer.files.length) {
-                    handleImageUpload(e.dataTransfer.files[0], preview, fileInput);
-                }
-            });
-            fileInput.addEventListener('change', (e) => {
-                if (e.target.files.length) {
-                    handleImageUpload(e.target.files[0], preview, fileInput);
-                }
-            });
-        }
-
-
-        // Обработка загрузки изображения
-        function handleImageUpload(file, previewElement, inputElement) {
-            if (!file.type.match('image.*')) {
-                alert('Пожалуйста, выберите файл изображения');
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                previewElement.innerHTML = `
-                    <img src="${e.target.result}" style="max-width: 200px; max-height: 200px; border-radius: 8px;">
-                    <p>${file.name}</p>
-                `;
+                area.style.borderColor = '#bdc3c7';
+                input.files = e.dataTransfer.files;
+                showPreview(input.files[0], preview);
             };
-            reader.readAsDataURL(file);
-            
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            inputElement.files = dataTransfer.files;
         }
 
-        // Общая функция для выполнения запросов
-        async function makeApiRequest(endpoint, options, loadingId, resultId, displayFunction) {
-            const loading = document.getElementById(loadingId);
-            const result = document.getElementById(resultId);
+        function showPreview(file, el) {
+            if(file) {
+                const reader = new FileReader();
+                reader.onload = (e) => el.innerHTML = `<img src="${e.target.result}" style="max-height:100px; border-radius:5px; margin-top:10px;">`;
+                reader.readAsDataURL(file);
+            }
+        }
 
-            loading.style.display = 'block';
-            result.style.display = 'none';
+        initUpload('drop-nsfw', 'file-nsfw', 'preview-nsfw');
+        initUpload('drop-multi', 'file-multi', 'preview-multi');
+
+        async function sendRequest(endpoint, body, resultId, type) {
+            const t = translations[curLang];
+            const resBox = document.getElementById(resultId);
+            resBox.style.display = 'block';
+            resBox.innerHTML = t.res_analysis;
+            resBox.className = 'result-box';
 
             try {
-                const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: 'Не удалось прочитать ошибку с сервера.' }));
-                    throw new Error(`Ошибка ${response.status}: ${errorData.detail || response.statusText}`);
+                const headers = {};
+                if (!(body instanceof FormData)) {
+                    headers['Content-Type'] = 'application/json';
+                    body = JSON.stringify(body);
                 }
 
-                const data = await response.json();
-                displayFunction(data);
-            } catch (error) {
-                showError(result, `Ошибка при запросе к API: ${error.message}`);
-            } finally {
-                loading.style.display = 'none';
-                result.style.display = 'block';
-            }
-        }
-
-
-        // Мультимодальный анализ
-        function analyzeMultimodal() {
-            const text = document.getElementById('multimodal-text').value;
-            const imageFile = document.getElementById('multimodal-image').files[0];
-
-            if (!text.trim() && !imageFile) {
-                alert('Пожалуйста, введите текст или загрузите изображение');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('text', text);
-            if (imageFile) {
-                formData.append('image', imageFile);
-            }
-
-            makeApiRequest(
-                '/api/classify_message/',
-                { method: 'POST', body: formData },
-                'multimodal-loading',
-                'multimodal-result',
-                displayAdResult
-            );
-        }
-
-        // Анализ только текста
-        function analyzeTextOnly() {
-            const text = document.getElementById('text-only-input').value;
-
-            if (!text.trim()) {
-                alert('Пожалуйста, введите текст для анализа');
-                return;
-            }
-
-            makeApiRequest(
-                '/api/classify_text/',
-                { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
-                },
-                'text-loading',
-                'text-result',
-                displayAdResult
-            );
-        }
-
-        // NSFW анализ
-        function analyzeNSFW() {
-            const imageFile = document.getElementById('nsfw-image').files[0];
-
-            if (!imageFile) {
-                alert('Пожалуйста, выберите изображение для анализа');
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('file', imageFile);
-
-            makeApiRequest(
-                '/api/classify_nsfw_image/',
-                { method: 'POST', body: formData },
-                'nsfw-loading',
-                'nsfw-result',
-                displayNSFWResult
-            );
-        }
-        
-        // Общая функция для отображения результатов "Реклама / Не реклама"
-        function displayAdResult(data, resultId) {
-            const result = document.getElementById(resultId);
-            const probPercent = (data.prediction_prob_ad * 100).toFixed(1);
-            const confidencePercent = (data.confidence * 100).toFixed(1);
-
-            result.className = `result ${data.is_ad ? 'ad' : 'not-ad'}`;
-            result.innerHTML = `
-                <h3>${data.is_ad ? '🚫 РЕКЛАМА' : '✅ НЕ РЕКЛАМА'}</h3>
-                <p>Вероятность рекламы: <strong>${probPercent}%</strong></p>
-                <div class="probability-bar">
-                    <div class="probability-fill ${data.is_ad ? 'ad' : 'not-ad'}" style="width: ${probPercent}%"></div>
-                </div>
-                <p>Уверенность: ${confidencePercent}%</p>
-                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
-            `;
-        }
-
-        // Перенаправляем старые функции на новую
-        function displayMultimodalResult(data) {
-            displayAdResult(data, 'multimodal-result');
-        }
-        function displayTextResult(data) {
-            displayAdResult(data, 'text-result');
-        }
-
-
-        // Отображение результатов NSFW анализа
-        function displayNSFWResult(data) {
-            const result = document.getElementById('nsfw-result');
-            const probPercent = (data.prediction_prob_nsfw * 100).toFixed(1);
-            const confidencePercent = (data.confidence * 100).toFixed(1);
-
-            result.className = `result ${data.is_nsfw ? 'nsfw' : 'safe'}`;
-            result.innerHTML = `
-                <h3>${data.is_nsfw ? '🔞 NSFW КОНТЕНТ' : '✅ БЕЗОПАСНЫЙ КОНТЕНТ'}</h3>
-                <p>Вероятность NSFW: <strong>${probPercent}%</strong></p>
-                <div class="probability-bar">
-                    <div class="probability-fill ${data.is_nsfw ? 'nsfw' : 'safe'}" style="width: ${probPercent}%"></div>
-                </div>
-                <p>Уверенность: ${confidencePercent}%</p>
-                ${data.error ? `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>` : ''}
-            `;
-        }
-
-        // Показать ошибку
-        function showError(resultElement, message) {
-            resultElement.className = 'result';
-            resultElement.innerHTML = `
-                <h3 style="color: #e74c3c;">❌ Ошибка</h3>
-                <p>${message}</p>
-            `;
-        }
-
-        // Проверка здоровья системы
-        async function checkHealth() {
-            const statusElement = document.getElementById('server-status');
-            const modelStatusElement = document.getElementById('model-status');
-            
-            statusElement.innerHTML = 'Проверка...';
-            modelStatusElement.innerHTML = 'Загрузка статуса моделей...';
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/health`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
+                const response = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers, body });
                 const data = await response.json();
 
-                statusElement.innerHTML = `
-                    <span class="status-indicator status-online"></span>
-                    <strong>Сервер работает</strong>
-                    <p>Статус: ${data.status}</p>
-                    <p>Устройство: ${data.device}</p>
-                `;
+                if(!response.ok) throw new Error(data.detail || 'Server Error');
+
+                let isPositive, prob, text;
                 
-                // Функция для создания статуса модели
-                const createModelStatus = (name, isLoaded) => `
-                    <div>
-                        <span class="status-indicator ${isLoaded ? 'status-online' : 'status-offline'}"></span>
-                        ${name}: <strong>${isLoaded ? 'Загружена' : 'Не загружена'}</strong>
+                if(type === 'nsfw') {
+                    isPositive = data.is_nsfw;
+                    prob = (data.prediction_prob_nsfw * 100).toFixed(1);
+                    text = isPositive ? t.res_nsfw_yes : t.res_nsfw_no;
+                    resBox.classList.add(isPositive ? 'nsfw' : 'safe');
+                } else {
+                    isPositive = data.is_ad;
+                    prob = (data.prediction_prob_ad * 100).toFixed(1);
+                    text = isPositive ? t.res_ad_yes : t.res_ad_no;
+                    resBox.classList.add(isPositive ? 'ad' : 'not-ad');
+                }
+
+                resBox.innerHTML = `
+                    <h3>${text}</h3>
+                    <p>${t.res_prob}: <strong>${prob}%</strong></p>
+                    <div class="progress">
+                        <div class="progress-bar" style="width: ${prob}%; background: ${isPositive ? '#eb4d4b' : '#22a6b3'}"></div>
                     </div>
                 `;
 
-                modelStatusElement.innerHTML = `
-                    ${createModelStatus('Мультимодальная модель', data.multimodal_model_loaded)}
-                    ${createModelStatus('Текстовая модель', data.text_only_model_loaded)}
-                    ${createModelStatus('NSFW модель', data.nsfw_model_loaded)}
-                `;
+            } catch (e) {
+                resBox.innerHTML = `<span style="color:red">Error: ${e.message}</span>`;
+            }
+        }
 
-            } catch (error) {
-                statusElement.innerHTML = `
-                    <span class="status-indicator status-offline"></span>
-                    <strong>Сервер недоступен</strong>
-                    <p>Ошибка: ${error.message}</p>
-                `;
-                modelStatusElement.innerHTML = 'Не удалось получить статус моделей.';
+        function runNSFW() {
+            const file = document.getElementById('file-nsfw').files[0];
+            if(!file) return alert(translations[curLang].alert_file);
+            const fd = new FormData(); fd.append('file', file);
+            sendRequest('/api/classify_nsfw_image/', fd, 'res-nsfw', 'nsfw');
+        }
+
+        function runMulti() {
+            const text = document.getElementById('text-multi').value;
+            const file = document.getElementById('file-multi').files[0];
+            if(!text && !file) return alert(translations[curLang].alert_input);
+            
+            const fd = new FormData();
+            fd.append('text', text);
+            if(file) fd.append('image', file);
+            
+            sendRequest('/api/classify_message/', fd, 'res-multi', 'ad');
+        }
+
+        function runText() {
+            const text = document.getElementById('text-only').value;
+            if(!text) return alert(translations[curLang].alert_input);
+            sendRequest('/api/classify_text/', { text }, 'res-text', 'ad');
+        }
+
+        async function checkHealth() {
+            try {
+                const res = await fetch(`${API_URL}/health`);
+                const data = await res.json();
+                alert(`${translations[curLang].server_ok}\nDevice: ${data.device}`);
+            } catch(e) {
+                alert(translations[curLang].server_err);
             }
         }
     </script>
