@@ -1,27 +1,106 @@
-[Unit]
-Description=Uvicorn FastAPI application
-After=network.target
+#etc/nginx/sites-available/blackfox
 
-[Service]
-ExecStart=/root/.cache/pypoetry/virtualenvs/blackfox-FAJo6lti-py3.12/bin/uvicorn app.server_run.main:app \
-    --host 0.0.0.0 --port 8000 \
-    --ssl-keyfile /etc/letsencrypt/live/blackfoxus.ru/privkey.pem \
-    --ssl-certfile /etc/letsencrypt/live/blackfoxus.ru/fullchain.pem
-Environment="PYTHONPATH=/root/blackfox"
-WorkingDirectory=/root/blackfox
-User=root
-Group=root
-Restart=always
+server {
+    listen 80;
+    server_name blackfoxus.ru www.blackfoxus.ru;
+    return 301 https://blackfoxus.ru$request_uri;
+}
 
-PrivateTmp=true
-ProtectSystem=full
-NoNewPrivileges=true
+server {
+    listen 443 ssl http2;
+    server_name blackfoxus.ru;
 
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=slut_detector
-
-[Install]
-WantedBy=multi-user.target
+    # Let's Encrypt сертификаты
+    ssl_certificate /etc/letsencrypt/live/blackfoxus.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/blackfoxus.ru/privkey.pem;
 
 
+    client_max_body_size 50M;
+    
+    # SSL настройки
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # Корневая директория сайта
+    root /var/www/blackfox;
+    index index.html;
+
+    # Статический сайт
+    location / {
+        try_files $uri $uri/ =404;
+        
+        # Кэширование статики
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    # API прокси
+    location /api/ {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # CORS headers
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization" always;
+        add_header Access-Control-Expose-Headers "Content-Length,Content-Range" always;
+        
+        # Handle OPTIONS preflight
+        if ($request_method = 'OPTIONS') {
+            add_header Access-Control-Allow-Origin "*";
+            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
+            add_header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization";
+            add_header Access-Control-Max-Age 1728000;
+            add_header Content-Type 'text/plain; charset=utf-8';
+            add_header Content-Length 0;
+            return 204;
+        }
+        
+        # Таймауты для ML моделей
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+    
+    # Health checks
+    location /health {
+        proxy_pass http://localhost:8000/health;
+        proxy_set_header Host $host;
+        access_log off;
+        
+        # CORS для health
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
+    }
+    
+    # Метрики
+    location /metrics {
+        proxy_pass http://localhost:8000/metrics;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+    
+    # Документация API
+    location /docs {
+        proxy_pass http://localhost:8000/docs;
+        proxy_set_header Host $host;
+    }
+    
+    location /redoc {
+        proxy_pass http://localhost:8000/redoc;
+        proxy_set_header Host $host;
+    }
+    
+    # Безопасность
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload";
+}
+root@mascav:~# 
