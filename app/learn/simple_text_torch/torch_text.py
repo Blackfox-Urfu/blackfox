@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     print("Starting Optuna optimization...")
     study = optuna.create_study(direction='maximize', pruner=optuna.pruners.HyperbandPruner())
-    study.optimize(lambda t: objective(t, X_train, y_train, X_val, y_val, input_size, device), n_trials=1000)
+    study.optimize(lambda t: objective(t, X_train, y_train, X_val, y_val, input_size, device), n_trials=10000)
     
     bp = study.best_params
     print(f"Best params: {bp}")
