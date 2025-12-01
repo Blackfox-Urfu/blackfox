@@ -5,6 +5,7 @@ CI/CD
 
 Мск должно быть в итоге просто шлюзом 
 
+systemctl restart blackfox-api
 
     # Корневая директория сайта
     root /var/www/blackfox;

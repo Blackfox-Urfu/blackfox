@@ -41,7 +41,7 @@ def process_data(ad_filepath, non_ad_filepath):
     labels = [1] * len(ad_texts) + [0] * len(non_ad_texts)
     return texts, labels
 
-# --- Dataset (Оптимизированный) ---
+# --- Dataset ---
 class PrecomputedDataset(Dataset):
     def __init__(self, features, labels):
         self.features = features
@@ -50,7 +50,7 @@ class PrecomputedDataset(Dataset):
     def __getitem__(self, idx):
         return {'text': self.features[idx], 'label': self.labels[idx]}
 
-# --- МОДЕЛЬ ---
+# --- МОДЕЛЬ (Идентична серверной, чтобы веса подошли) ---
 class AdvancedTextClassifier(nn.Module):
     def __init__(self, input_size, hidden_layers=[512, 256, 128], num_classes=2, dropout=0.3, activation='relu', use_batch_norm=True):
         super(AdvancedTextClassifier, self).__init__()
@@ -89,35 +89,56 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         total_loss += loss.item()
     return total_loss / len(dataloader)
 
-def validate(model, dataloader, device):
+def validate_metrics(model, dataloader, criterion, device):
     model.eval()
-    all_preds, all_labels = [], []
+    total_loss = 0
+    all_preds = []
+    all_labels = []
+    total_confidence = 0
+    
     with torch.no_grad():
         for batch in dataloader:
             inputs = batch['text'].to(device, non_blocking=True)
             labels = batch['label'].to(device, non_blocking=True)
+            
             outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+            
+            probabilities = torch.softmax(outputs, dim=1)
+            confidence, preds = torch.max(probabilities, 1)
+            
+            total_confidence += confidence.sum().item()
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
-    return f1_score(all_labels, all_preds, zero_division=0)
+            
+    avg_loss = total_loss / len(dataloader)
+    f1 = f1_score(all_labels, all_preds, zero_division=0)
+    avg_conf = total_confidence / len(all_labels)
+    
+    return avg_loss, f1, avg_conf
 
-# --- Optuna Objective ---
+# --- Optuna Objective (УСИЛЕННЫЙ) ---
 def objective(trial, train_features, train_labels, val_features, val_labels, input_size, device):
-    # Архитектура
-    num_layers = trial.suggest_int('num_layers', 1, 4)
+    # === ИЗМЕНЕНИЕ 1: Увеличиваем сложность архитектуры ===)
+    num_layers = trial.suggest_int('num_layers', 1, 8) 
     hidden_sizes = []
     for i in range(num_layers):
-        hidden_sizes.append(trial.suggest_int(f'hidden_{i}', 64, 1024, step=64))
+        # Намного больше нейронов (до 2048)
+        hidden_sizes.append(trial.suggest_int(f'hidden_{i}', 256, 2048, step=128))
         
-    dropout = trial.suggest_float('dropout', 0.1, 0.6)
+    dropout = trial.suggest_float('dropout', 0.2, 0.6) # Чуть выше дропаут, чтобы большая модель не переобучилась
     activation = trial.suggest_categorical('activation', ['relu', 'leaky_relu', 'elu'])
     use_batch_norm = trial.suggest_categorical('use_batch_norm', [True, False])
     
     # Оптимизация
-    lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
-    weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
-    batch_size = trial.suggest_categorical('batch_size', [64, 128, 256, 512])
+    lr = trial.suggest_float('lr', 1e-5, 5e-3, log=True)
+    weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
+    
+    # === ИЗМЕНЕНИЕ 2: Уменьшаем Batch Size ===
+    # Меньший батч дает более "шумный" градиент, что помогает выбираться из локальных минимумов
+    # и заставляет модель учиться дольше и тщательнее.
+    batch_size = trial.suggest_categorical('batch_size', [32, 64, 128])
     
     # Dataset Setup
     train_ds = PrecomputedDataset(train_features, train_labels)
@@ -140,22 +161,20 @@ def objective(trial, train_features, train_labels, val_features, val_labels, inp
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     
-    # ИСПРАВЛЕНИЕ ЗДЕСЬ: Убран verbose=False
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
+    criterion = nn.CrossEntropyLoss()
     
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    
-    for epoch in range(8): 
+    # Увеличим число эпох внутри Optuna, чтобы тяжелая модель успела сойтись
+    for epoch in range(12): 
         train_epoch(model, train_loader, criterion, optimizer, device)
-        val_f1 = validate(model, val_loader, device)
+        val_loss, val_f1, val_conf = validate_metrics(model, val_loader, criterion, device)
         
-        # Шаг планировщика
-        scheduler.step(val_f1)
+        scheduler.step(val_loss)
         
-        trial.report(val_f1, epoch)
+        trial.report(val_loss, epoch)
         if trial.should_prune(): raise optuna.TrialPruned()
         
-    return val_f1
+    return val_loss
 
 def prepare_tensor_data(texts, labels, vectorizer, fit=False):
     if fit:
@@ -185,12 +204,16 @@ if __name__ == "__main__":
     except: pass
     stop_words = stopwords.words('russian')
     
-    print("Vectorizing data...")
+    print("Vectorizing data (Heavy Mode)...")
+    
+    # === ИЗМЕНЕНИЕ 3: Усиленный Векторайзер ===
+    # max_features=40000: Увеличиваем размер словаря в 2 раза
+    # ngram_range=(1, 3): Учитываем тройки слов (триграммы). Это даст модели контекст.
     vectorizer = TfidfVectorizer(
-        max_features=20000, 
+        max_features=100000, 
         stop_words=stop_words, 
-        ngram_range=(1, 2), 
-        min_df=3, 
+        ngram_range=(1, 3), 
+        min_df=2, # Чуть снижаем порог редких слов
         sublinear_tf=True
     )
     
@@ -199,14 +222,16 @@ if __name__ == "__main__":
     X_test, y_test = prepare_tensor_data(test_texts, test_labels, vectorizer, fit=False)
     
     input_size = X_train.shape[1]
-    print(f"Input size: {input_size}")
+    print(f"New Input size: {input_size}")
 
-    print("Starting Optuna optimization...")
-    study = optuna.create_study(direction='maximize', pruner=optuna.pruners.HyperbandPruner())
-    study.optimize(lambda t: objective(t, X_train, y_train, X_val, y_val, input_size, device), n_trials=10000)
+    print("Starting Optuna optimization (Minimizing Validation Loss)...")
+    study = optuna.create_study(direction='minimize', pruner=optuna.pruners.HyperbandPruner())
+    # Увеличим количество трайалов, так как пространство поиска стало огромным
+    study.optimize(lambda t: objective(t, X_train, y_train, X_val, y_val, input_size, device), n_trials=150) 
     
     bp = study.best_params
-    print(f"Best params: {bp}")
+    print(f"Best params (Low Loss): {bp}")
+    print(f"Best Loss: {study.best_value}")
     
     # --- Финальное обучение ---
     print("Training final model...")
@@ -221,11 +246,8 @@ if __name__ == "__main__":
     ).to(device)
     
     optimizer = optim.AdamW(final_model.parameters(), lr=bp['lr'], weight_decay=bp['weight_decay'])
-    
-    # И ТУТ ТОЖЕ ПРОВЕРЯЕМ (убрал verbose)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2)
-    
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    criterion = nn.CrossEntropyLoss()
     
     X_full = torch.cat((X_train, X_val), dim=0)
     y_full = torch.cat((y_train, y_val), dim=0)
@@ -239,26 +261,29 @@ if __name__ == "__main__":
     train_loader = DataLoader(full_ds, batch_size=bp['batch_size'], sampler=sampler, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=bp['batch_size'], shuffle=False, num_workers=0)
     
-    best_test_f1 = 0.0
-    patience = 5
+    best_loss = float('inf')
+    best_f1_at_best_loss = 0.0
+    patience = 8 # Увеличили терпение, так как модель тяжелая и может колебаться
     patience_counter = 0
     
-    for epoch in range(30):
-        loss = train_epoch(final_model, train_loader, criterion, optimizer, device)
-        test_f1 = validate(final_model, test_loader, device)
-        scheduler.step(test_f1)
+    # Больше эпох для финального обучения
+    for epoch in range(50):
+        train_loss = train_epoch(final_model, train_loader, criterion, optimizer, device)
+        val_loss, val_f1, val_conf = validate_metrics(final_model, test_loader, criterion, device)
+        scheduler.step(val_loss)
         
         current_lr = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch+1} | Loss: {loss:.4f} | Test F1: {test_f1:.4f} | LR: {current_lr:.2e}")
+        print(f"Epoch {epoch+1} | Loss: {val_loss:.4f} | F1: {val_f1:.4f} | Avg Conf: {val_conf:.2f} | LR: {current_lr:.2e}")
         
-        if test_f1 > best_test_f1:
-            best_test_f1 = test_f1
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_f1_at_best_loss = val_f1
             patience_counter = 0
             
             checkpoint = {
                 'model_config': {
                     'input_size': input_size,
-                    'hidden_layers': hidden_layers,
+                    'hidden_layers': hidden_layers, # Сервер сам создаст нужное кол-во слоев
                     'dropout': bp['dropout'],
                     'activation': bp['activation'],
                     'use_batch_norm': bp['use_batch_norm'],
@@ -269,11 +294,11 @@ if __name__ == "__main__":
             }
             torch.save(checkpoint, os.path.join(RESULTS_DIR, 'best_final_model.pth'))
             joblib.dump(vectorizer, os.path.join(RESULTS_DIR, 'final_vectorizer.pkl'))
-            print("  -> Saved new best model")
+            print("  -> Saved new best model (Lowest Loss)")
         else:
             patience_counter += 1
             if patience_counter >= patience:
                 print("Early stopping triggered.")
                 break
             
-    print(f"Final Best F1: {best_test_f1}")
+    print(f"Final Best Loss: {best_loss:.4f}, F1 at that loss: {best_f1_at_best_loss:.4f}")
