@@ -351,7 +351,7 @@ def run_training():
     # Увеличим количество попыток, так как параметров стало больше
     study.optimize(
         lambda trial: objective(trial, train_ds, val_ds, text_vectorizer.max_features, X_features_all.shape[1], num_workers), 
-        n_trials=50 
+        n_trials=100 
     ) 
     
     best_params = study.best_params
