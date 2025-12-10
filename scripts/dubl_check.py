@@ -8,12 +8,10 @@ from collections import defaultdict
 import concurrent.futures
 
 # --- Оптимизация №1: Использовать более быстрый алгоритм хеширования ---
-# blake2b часто быстрее sha256 при сохранении криптографической стойкости
 HASH_ALGO = 'blake2b'
 HASHER = getattr(hashlib, HASH_ALGO)
 
 # --- Оптимизация №2: Предварительная фильтрация по расширениям ---
-# Пропускаем файлы, которые почти наверняка не являются изображениями
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
 
 def calculate_file_hash(filepath, chunk_size=8192):
@@ -25,7 +23,6 @@ def calculate_file_hash(filepath, chunk_size=8192):
                 hasher.update(chunk)
         return hasher.hexdigest()
     except (FileNotFoundError, PermissionError):
-        # Ошибки доступа лучше обрабатывать в вызывающей функции
         return None
     except Exception:
         return None
@@ -43,7 +40,6 @@ def is_image_file(filepath):
 def process_file(filepath):
     """
     Обрабатывает один файл: проверяет, является ли он изображением, и вычисляет его хеш.
-    Возвращает кортеж (хеш, путь_к_файлу) или None.
     """
     # Сначала быстрая проверка по расширению
     if filepath.suffix.lower() not in IMAGE_EXTENSIONS:
@@ -59,7 +55,6 @@ def process_file(filepath):
 def find_and_handle_duplicate_photos(directory):
     """
     Находит дубликаты фотографий, выводит их список и предлагает пользователю их удалить.
-    Сохраняет файл с самым коротким путем.
     """
     directory_path = Path(directory)
     if not directory_path.is_dir():
@@ -70,27 +65,33 @@ def find_and_handle_duplicate_photos(directory):
     hashes_to_filepaths = defaultdict(list)
 
     # Рекурсивно находим все файлы в директории
-    all_files = [p for p in directory_path.rglob('*') if p.is_file()]
+    # Преобразуем генератор в список, чтобы знать общее количество для tqdm
+    try:
+        all_files = [p for p in directory_path.rglob('*') if p.is_file()]
+    except PermissionError:
+        print("Ошибка: Нет прав доступа к некоторым подпапкам.")
+        return
+
+    if not all_files:
+        print("В указанной папке файлы не найдены.")
+        return
 
     # --- Оптимизация №3: Параллельная обработка файлов ---
-    # Используем все доступные ядра процессора для ускорения
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        # map выполняет process_file для каждого элемента в all_files параллельно
-        # tqdm оборачивает для отображения прогресса
         results = list(tqdm(executor.map(process_file, all_files), total=len(all_files), desc="Анализ файлов"))
 
-    # Собираем результаты из параллельных процессов
+    # Собираем результаты
     for result in results:
         if result:
             file_hash, filepath = result
             hashes_to_filepaths[file_hash].append(filepath)
 
-    # Собираем группы дубликатов и сразу формируем список на удаление
+    # Собираем группы дубликатов
     duplicate_groups = []
     files_to_delete = []
     for filepaths in hashes_to_filepaths.values():
         if len(filepaths) > 1:
-            filepaths.sort(key=len)
+            filepaths.sort(key=len) # Оставляем самый короткий путь как оригинал
             duplicate_groups.append(filepaths)
             files_to_delete.extend(filepaths[1:])
 
@@ -108,12 +109,12 @@ def find_and_handle_duplicate_photos(directory):
         print()
     print("-" * 40)
 
-    # --- Запрос подтверждения у пользователя ---
+    # --- Запрос подтверждения ---
     while True:
         try:
             prompt = f"Вы хотите удалить все {len(files_to_delete)} найденных дубликатов? (да/нет): "
             user_choice = input(prompt).lower().strip()
-        except EOFError: # Если скрипт запускается неинтерактивно
+        except EOFError:
              print("\nНеинтерактивный режим. Удаление отменено.")
              user_choice = 'нет'
 
@@ -139,12 +140,79 @@ def find_and_handle_duplicate_photos(directory):
     else:
         print("\nУдаление отменено пользователем. Файлы не были удалены.")
 
-if __name__ == "__main__":
+# --- ФУНКЦИЯ ВЫБОРА ПАПКИ ДЛЯ СКАНИРОВАНИЯ ---
+def select_scan_directory():
+    print("\n--- ВЫБОР ПАПКИ ДЛЯ ПОИСКА ДУБЛИКАТОВ ---")
+    
+    # Определяем путь по умолчанию (текущая папка проекта/data)
     try:
-        PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+        default_local = Path(__file__).parent.parent.resolve() / "data"
     except NameError:
-        PROJECT_ROOT = Path('.').resolve().parent
-        print(f"Переменная __file__ не определена. Установлен корень проекта: {PROJECT_ROOT}")
+        default_local = Path('.').resolve() / "data"
 
-    target_directory = PROJECT_ROOT / "data"
+    print(f"1. Локальная папка проекта ({default_local})")
+    print("2. Диск sdb1 (ожидается в /mnt/sdb1/reddit_data или корне диска)")
+    print("3. Ввести свой путь вручную")
+    
+    choice = input("Выберите вариант (1-3): ").strip()
+    
+    target_path = ""
+    
+    if choice == '1':
+        target_path = default_local
+    elif choice == '2':
+        # Проверяем популярные точки монтирования
+        potential_mounts = ["/mnt/sdb1", "/media/sdb1", "/mnt/data", "/media/data"]
+        found_mount = None
+        
+        for mount in potential_mounts:
+            if os.path.exists(mount) and os.path.isdir(mount):
+                found_mount = mount
+                break
+        
+        if found_mount:
+            # Если мы сохраняли загрузчиком в папку reddit_data, ищем её там
+            reddit_data_path = os.path.join(found_mount, "reddit_data")
+            if os.path.exists(reddit_data_path):
+                target_path = reddit_data_path
+                print(f"--> Найдена папка с данными: {target_path}")
+            else:
+                target_path = found_mount
+                print(f"--> Папка reddit_data не найдена, сканируем корень диска: {target_path}")
+        else:
+            print("(!) Не удалось автоматически найти точку монтирования для sdb1.")
+            target_path = input("Введите путь к точке монтирования вручную (например /mnt/sdb1): ").strip()
+            
+    elif choice == '3':
+        target_path = input("Введите полный путь к папке для сканирования: ").strip()
+    else:
+        print("Неверный выбор, используется локальная папка по умолчанию.")
+        target_path = default_local
+
+    # Преобразуем в Path и проверяем существование
+    path_obj = Path(target_path)
+    if not path_obj.exists():
+        print(f"\n[ОШИБКА] Указанный путь не существует: {path_obj}")
+        sys.exit(1)
+
+    # Проверка прав на запись (нужна для удаления дубликатов)
+    try:
+        test_file = path_obj / ".write_test_delete_me"
+        with open(test_file, 'w') as f: f.write('test')
+        os.remove(test_file)
+    except PermissionError:
+        print(f"\n[ОШИБКА] У вас нет прав на удаление файлов в папке: {path_obj}")
+        print("Запустите скрипт через sudo или измените права доступа (chmod).")
+        sys.exit(1)
+    except Exception as e:
+        # Если папка только для чтения, мы не сможем удалить дубликаты
+        print(f"\n[ПРЕДУПРЕЖДЕНИЕ] Проблема с правами доступа: {e}")
+        
+    return path_obj
+
+if __name__ == "__main__":
+    # Выбираем папку
+    target_directory = select_scan_directory()
+    
+    # Запускаем поиск
     find_and_handle_duplicate_photos(target_directory)

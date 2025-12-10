@@ -11,7 +11,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from prawcore.exceptions import TooManyRequests
 
-
 # --- Конфигурация ---
 dotenv.load_dotenv()
 CLIENT_ID = os.getenv('CLIENT_ID')
@@ -19,136 +18,8 @@ CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 USER_AGENT = os.getenv('USER_AGENT')
 
 
-SFW_SUBREDDITS = ['streetphotography','photoshopbattles','selfie','SelfieOver25']
+SFW_SUBREDDITS = []
 NSFW_SUBREDDITS = [
-    'gonwild',
-    'ratemynudebody',
-    'onmww',
-    'GWCouples',
-    'gonewildcouples',
-    'WouldYouFuckMyWife',
-    'gonewildcurvy',
-    'GoneWildplus',
-    'BigBoobsGW',
-    'bigboobsgonewild',
-    'mycleavage',
-    'AsiansGoneWild',
-    'gonewildcolor',
-    'indiansgonewild',
-    'latinasgw',
-    'pawgtastic',
-    'workgonewild',
-    'GoneWildScrubs',
-    'swingersgw',
-    'militarygonewild',
-    'NSFW_Snapchat',
-    'snapleaks',
-    'wifesharing',
-    'hotwife',
-    'slutwife',
-    'futanari',
-    'doujinshi',
-    'yiff',
-    'monstergirl',
-    'mechanicalsluts',
-    'rule34_comics',
-    'sex_comics',
-    'overwatch_porn',
-    'pokeporn',
-    'bowsette',
-    'rule34lol',
-    'rule34overwatch',
-    'nintendowaifus',
-    '34honor',
-    'fivefapsatfreddys',
-    'breathofthegonewild',
-    'animalcrossingr34',
-    'apexlegends_porn',
-    'tflewd',
-    'thelostwoods',
-    'hentai_gif',
-    'WesternHentai',
-    'hentai_irl',
-    'artistic_hentai',
-    'hentaibeast',
-    'hentaihumiliation',
-    'traphentai',
-    'ahegao',
-    'ahegao_irl',
-    'hypnohentai',
-    'tentai',
-    'handholding',
-    'honeyfuckers',
-    'itshiptofuckbees',
-    'guro',
-    'hentaibondage',
-    'animeshorts',
-    'kuroihada',
-    '2dtittytouching',
-    'buttfangs',
-    'yuri',
-    'ZettaiRyouiki',
-    'hentaifemdom',
-    'thighhighhentai',
-    'animebooty',
-    'swimsuithentai',
-    'animelegs',
-    'animearmpits',
-    '2dsuccubi',
-    'animemidriff',
-    'skindentation',
-    'thighdeology',
-    'chiisaihentai',
-    'bokunoeroacademia',
-    'waifusgonewild',
-    'sideoppai',
-    'BDSMcommunity',
-    'onherknees',
-    'blowjobsandwich',
-    'asstastic',
-    'facedownassup',
-    'assinthong',
-    'bigasses',
-    'buttplug',
-    'TheUnderbun',
-    'booty',
-    'pawg',
-    'paag',
-    'cutelittlebutts',
-    'HungryButts',
-    'celebritybutts',
-    'cosplaybutts',
-    'mooning',
-    'painal',
-    'masterofanal',
-    'buttsharpies',
-    'AssholeBehindThong',
-    'spreadem',
-    'bendover',
-    'girlsinyogapants',
-    'yogapants',
-    'boobies',
-    'TittyDrop',
-    'boltedontits',
-    'boobbounce',
-    'homegrowntits',
-    'breastenvy',
-    'youtubetitties',
-    'torpedotits',
-    'thehangingboobs',
-    'page3glamour',
-    'biggerthanyouthought',
-    'BustyPetite',
-    'hugeboobs',
-    'stacked',
-    'burstingout',
-    '2busty2hide',
-    'bigtiddygothgf',
-    'engorgedveinybreasts',
-    'pokies',
-    'ghostnipples',
-    'nipples',
-    'puffies',
     'lactation',
     'tinytits',
     'aa_cups',
@@ -397,13 +268,7 @@ NSFW_SUBREDDITS = [
     'wetspotguy',
     'Koreanhottiesreal'
 ]
-
-
-SFW_SAVE_PATH = "data/reddit/sfw_images"
-NSFW_SAVE_PATH = "data/reddit/nsfw_images"
-os.makedirs(SFW_SAVE_PATH, exist_ok=True)
-os.makedirs(NSFW_SAVE_PATH, exist_ok=True)
-
+# --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ (будут переопределены в main) ---
 DOWNLOAD_LIMIT_PER_SUBREDDIT = 100000
 MAX_WORKERS = 15
 DOWNLOAD_TIMEOUT = 25
@@ -427,52 +292,43 @@ def download_image(url, target_filepath, pbar_images):
         pbar_images.update(1)
     except requests.exceptions.RequestException: pass
 
-# --- ФИНАЛЬНАЯ ВЕРСИЯ ПРОДЮСЕРА ---
 def submission_producer(subreddit_name, limit, submission_queue, stop_event):
-    """
-    'Продюсер', который получает посты от Reddit, ПОЛНОСТЬЮ ИХ ЗАГРУЖАЕТ
-    и умеет обрабатывать Rate Limit.
-    """
     try:
         for submission in reddit.subreddit(subreddit_name).hot(limit=limit):
             if stop_event.is_set():
                 break
             
-            # --- НОВЫЙ БЛОК: Принудительная загрузка данных ---
             while True:
                 try:
-                    # Эта строка заставляет PRAW загрузить все "ленивые" атрибуты.
-                    # Она сама может вызвать ошибку TooManyRequests.
                     submission._fetch()
-                    break # Если успешно, выходим из внутреннего цикла
+                    break 
                 except TooManyRequests as e:
-                    # Перехватываем ошибку Rate Limit здесь, внутри цикла
                     wait_time_str = e.response.headers.get('retry-after', "60")
                     wait_time = int(float(wait_time_str)) + 1
                     tqdm.write(f"  [Rate Limit on fetch] r/{subreddit_name}. Waiting for {wait_time} s...")
                     time.sleep(wait_time)
                 except Exception as e:
                     tqdm.write(f"  [Error fetching submission details] ID: {submission.id}, Error: {e}")
-                    # Помечаем пост как невалидный, чтобы пропустить его
                     submission = None 
                     break
-            # --- КОНЕЦ НОВОГО БЛОКА ---
             
-            if submission: # Кладем в очередь только если загрузка прошла успешно
+            if submission:
                 submission_queue.put(submission)
                 
     except TooManyRequests as e:
-        # Эта ошибка может возникнуть на самом первом запросе (получение списка)
         wait_time_str = e.response.headers.get('retry-after', "60")
         wait_time = int(float(wait_time_str)) + 1
         tqdm.write(f"  [Rate Limit on listing] r/{subreddit_name}. Waiting for {wait_time} s and stopping producer.")
-        time.sleep(wait_time) # Просто ждем и завершаем продюсер для этого саба
+        time.sleep(wait_time) 
     except Exception as e:
         tqdm.write(f"  [PRAW Error in Producer] r/{subreddit_name}: {e}")
     finally:
         submission_queue.put(None)
 
 def fetch_and_download(subreddit_names, save_path_base, is_nsfw_collection):
+    # Создаем базовую директорию, если её нет
+    os.makedirs(save_path_base, exist_ok=True)
+
     for sub_name in tqdm(subreddit_names, desc="Overall Subreddits Progress", unit="sub", position=0, leave=True):
         tqdm.write(f"\nFetching from r/{sub_name}...")
         subreddit_save_path = os.path.join(save_path_base, sub_name)
@@ -494,7 +350,7 @@ def fetch_and_download(subreddit_names, save_path_base, is_nsfw_collection):
 
                 while pbar_posts.n < estimated_posts_to_scan:
                     try:
-                        submission = submission_queue.get(timeout=20) # Увеличим таймаут
+                        submission = submission_queue.get(timeout=20)
                         if submission is None: break
                         
                         pbar_posts.update(1)
@@ -505,7 +361,6 @@ def fetch_and_download(subreddit_names, save_path_base, is_nsfw_collection):
 
                         if pbar_images.n >= DOWNLOAD_LIMIT_PER_SUBREDDIT: break
 
-                        # Теперь эти проверки не вызывают сетевых запросов
                         is_image = (hasattr(submission, 'post_hint') and submission.post_hint == 'image') or \
                                    (hasattr(submission, 'is_gallery') and submission.is_gallery)
                         if not is_image: continue
@@ -536,11 +391,71 @@ def fetch_and_download(subreddit_names, save_path_base, is_nsfw_collection):
                 executor.shutdown(wait=False, cancel_futures=True)
                 tqdm.write(f"Finished r/{sub_name}, downloaded {pbar_images.n} images from {pbar_posts.n} scanned posts.\n")
 
+# --- ФУНКЦИЯ ВЫБОРА ДИСКА ---
+def select_storage_path():
+    print("\n--- ВЫБОР МЕСТА СОХРАНЕНИЯ / STORAGE SELECTION ---")
+    print("1. Текущая папка (./data/reddit)")
+    print("2. Диск sdb1 (ожидается в /mnt/sdb1)")
+    print("3. Ввести свой путь вручную (Custom path)")
+    
+    choice = input("Выберите вариант (1-3): ").strip()
+    
+    base_path = ""
+    
+    if choice == '1':
+        base_path = "data/reddit"
+    elif choice == '2':
+        # Проверяем популярные точки монтирования для sdb1
+        potential_mounts = ["/mnt/sdb1", "/media/sdb1", "/mnt/data", "/media/data"]
+        found = False
+        for mount in potential_mounts:
+            if os.path.exists(mount) and os.path.isdir(mount):
+                base_path = os.path.join(mount, "data")
+                print(f"--> Найден диск: {mount}. Сохраняем в {base_path}")
+                found = True
+                break
+        
+        if not found:
+            print("(!) Не удалось автоматически найти точку монтирования для sdb1.")
+            print("Убедитесь, что диск смонтирован (команда: mount /dev/sdb1 /mnt/sdb1).")
+            base_path = input("Введите путь к точке монтирования вручную (например /mnt/sdb1): ").strip()
+            base_path = os.path.join(base_path, "data")
+            
+    elif choice == '3':
+        base_path = input("Введите полный путь к папке (например D:\\Images или /mnt/disk2): ").strip()
+    else:
+        print("Неверный выбор, используется путь по умолчанию.")
+        base_path = "data/reddit"
+        
+    # Подтверждение
+    print(f"\n--> Файлы будут сохранены в: {os.path.abspath(base_path)}")
+    try:
+        os.makedirs(base_path, exist_ok=True)
+        # Пробная запись, чтобы проверить права доступа
+        test_file = os.path.join(base_path, ".write_test")
+        with open(test_file, 'w') as f: f.write('ok')
+        os.remove(test_file)
+    except PermissionError:
+        print(f"\n[ОШИБКА] Нет прав на запись в {base_path}!")
+        print("Попробуйте запустить скрипт через sudo или измените права на папку (chmod 777 ...)")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[ОШИБКА] Не удалось создать директорию: {e}")
+        sys.exit(1)
+        
+    return base_path
+
 if __name__ == "__main__":
-    print("--- Starting SFW Image Collection ---")
-    fetch_and_download(SFW_SUBREDDITS, SFW_SAVE_PATH, is_nsfw_collection=False)
+    # Сначала спрашиваем, куда сохранять
+    ROOT_SAVE_PATH = select_storage_path()
+    
+    sfw_path = os.path.join(ROOT_SAVE_PATH, "sfw_images")
+    nsfw_path = os.path.join(ROOT_SAVE_PATH, "nsfw_images")
+
+    print("\n--- Starting SFW Image Collection ---")
+    fetch_and_download(SFW_SUBREDDITS, sfw_path, is_nsfw_collection=False)
 
     print("\n\n--- Starting NSFW Image Collection (USE RESPONSIBLY!) ---")
-    fetch_and_download(NSFW_SUBREDDITS, NSFW_SAVE_PATH, is_nsfw_collection=True)
+    fetch_and_download(NSFW_SUBREDDITS, nsfw_path, is_nsfw_collection=True)
 
     print("\n--- Collection Finished ---")

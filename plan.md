@@ -3,6 +3,8 @@
 парсер реддита должен проверить оценку заведомо sfw контента перед добавление в датасет
 CI/CD
 
+Перевести текстовые датасеты на английский (gpt-oss?)
+
 Мск должно быть в итоге просто шлюзом
 
 
@@ -10,7 +12,15 @@ CI/CD
     root /var/www/blackfox;
     index index.html;
 
-18 11 2025
+Нужно выполнить три шага по очереди
+1. Создать папку (точку монтирования)
+sudo mkdir -p /mnt/fast_ssd
+2. Примонтировать диск (ваша команда)
+sudo mount -o noatime,nodiratime,data=writeback /dev/nvme1n1p1 /mnt/fast_ssd
+3. Дать права вашему пользователю (КРИТИЧНО ВАЖНО)
+Сейчас папка принадлежит root, и ваш скрипт не сможет туда писать. Передадим её пользователю pesha:
+sudo chown pesha:pesha /mnt/fast_ssd
+
 Generating final predictions for reports & SHAP data:  73%|███████████████████████████████████████████████████████████████████████████████████████████████████▋                                    | 187/255 [02:31<01:48,  1.59s/it]Premature end of JPEG file
 Generating final predictions for reports & SHAP data:  74%|████████████████████████████████████████████████████████████████████████████████████████████████████▊                                   | 189/255 [02:32<01:06,  1.00s/it]libpng warning: sBIT: invalid
 Generating final predictions for reports & SHAP data:  84%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████▋                     | 215/255 [02:51<00:20,  1.99it/s]libpng warning: iCCP: known incorrect sRGB profile

@@ -35,6 +35,7 @@ from albumentations.pytorch import ToTensorV2
 import multiprocessing 
 import hashlib
 import cv2 
+import resource
 
 try:
     if '__file__' in locals():
@@ -76,25 +77,25 @@ IMG_SIZE = 256
 BATCH_SIZE = 512
 EPOCHS = 7
 PATIENCE = 3
-OPTUNA_N_TRIALS = 10
-OPTUNA_EPOCHS = 4
+OPTUNA_N_TRIALS = 30
+OPTUNA_EPOCHS = 5
 OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
-OPTUNA_DATASET_FRACTION = 3 / 5
+OPTUNA_DATASET_FRACTION = 0.6
 FINAL_TEST_SET_FRACTION = 0.2
 
-DISK_CACHE_DIR = 'data/resized_cache' # Укажите путь к папке кэша
-os.makedirs(DISK_CACHE_DIR, exist_ok=True)
+# --- ПУТИ (Будут заданы динамически в main) ---
+DISK_CACHE_DIR = None 
+SLUT_DATA_DIR = None
+REGULAR_DATA_DIR = None
 
+# Пути к моделям оставляем локальными (внутри папки скрипта)
 MODEL_DIR = 'model/resnet'
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 ONNX_PATH = os.path.join(MODEL_DIR, 'nsfw_resnet.onnx')
 BEST_OPTUNA_PARAMS_PATH = os.path.join(MODEL_DIR, 'best_optuna_params.pkl')
-
 BEST_STATE_DICT_PATH = os.path.join(MODEL_DIR, 'best_resnet_state_dict.pth')
 FINAL_CHECKPOINT_PATH = os.path.join(MODEL_DIR, 'best_resnet_checkpoint.pth')
-
-# ADDED: Define missing path variables
 QUANTIZED_MODEL_PATH = os.path.join(MODEL_DIR, 'quantized_resnet_state_dict.pth')
 OPTIMAL_THRESHOLD_PATH = os.path.join(MODEL_DIR, 'optimal_threshold.pkl')
 
@@ -104,11 +105,10 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 FINAL_TEST_DATA_PATHS_FILE = os.path.join(RESULTS_DIR, "final_test_data_paths.txt")
 FINAL_TEST_DATA_LABELS_FILE = os.path.join(RESULTS_DIR, "final_test_data_labels.txt")
 
-SLUT_DATA_DIR = 'data/reddit/nsfw_images'
-REGULAR_DATA_DIR = 'data/reddit/sfw_images'
-
 OPTIMAL_THRESHOLD = 0.5
 
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 # --- Аугментация данных ---
 train_transform = A.Compose([
@@ -134,71 +134,73 @@ val_transform = A.Compose([
 # --- Датасет ---
 # --- Замените вашу функцию _resize_and_save_worker на эту ---
 
+    
 def _resize_and_save_worker(args):
     """
-    Воркер для мультипроцессинга.
-    Явно кодирует изображение в PNG перед записью во временный файл.
+    Турбо-воркер: Сохраняет в BMP (без сжатия). 
+    Занимает больше места на диске, но чтение почти мгновенное (нет нагрузки на CPU).
     """
     original_path, cached_path, img_size = args
+    
+    # МЕНЯЕМ РАСШИРЕНИЕ НА .bmp
+    cached_path = os.path.splitext(cached_path)[0] + ".bmp"
     temp_cached_path = cached_path + ".tmp"
 
     try:
-        os.makedirs(os.path.dirname(cached_path), exist_ok=True)
+        if os.path.exists(cached_path): return cached_path
+        if not os.path.exists(original_path): return None
 
-        if os.path.exists(temp_cached_path):
-            os.remove(temp_cached_path)
-
-        # Шаг 1: Читаем и изменяем размер с помощью OpenCV
         img_bgr = cv2.imread(original_path)
-        if img_bgr is None:
-            raise IOError(f"OpenCV could not read image: {original_path}")
+        if img_bgr is None: return None
 
         img_resized = cv2.resize(img_bgr, (img_size, img_size), interpolation=cv2.INTER_AREA)
 
-        # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
-        # Шаг 2: Явно кодируем изображение в формат .png в памяти.
-        # Это возвращает кортеж (успех, буфер с байтами изображения).
-        success, buffer = cv2.imencode('.png', img_resized)
-        if not success:
-            raise IOError(f"cv2.imencode failed for {original_path}")
+        # ПИШЕМ КАК BMP (без сжатия)
+        # Это работает намного быстрее, чем кодирование/декодирование JPG
+        cv2.imwrite(temp_cached_path, img_resized)
 
-        # Шаг 3: Записываем байты из буфера во временный файл.
-        # Теперь imwrite не используется, и расширение .tmp не имеет значения.
-        with open(temp_cached_path, 'wb') as f:
-            f.write(buffer)
-        # ---------------------------
-
-        # Шаг 4: Атомарно переименовываем, как и раньше
         os.rename(temp_cached_path, cached_path)
-        
         return cached_path
         
-    except Exception as e:
-        print(f"\n[CACHE WORKER ERROR] Failed to process {original_path}. Error: {e}\n", flush=True)
+    except Exception:
         if os.path.exists(temp_cached_path):
-            try:
-                os.remove(temp_cached_path)
-            except OSError:
-                pass
+            try: os.remove(temp_cached_path)
+            except OSError: pass
         return None
+
+# --- ЛЕЧЕНИЕ "Too many open files" ---
+# 1. Меняем стратегию обмена данными в PyTorch (не влияет на скорость, но экономит дескрипторы)
+torch.multiprocessing.set_sharing_strategy('file_system')
+
+# 2. Пытаемся программно поднять лимит открытых файлов
+try:
+    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    # Ставим мягкий лимит равным жесткому (обычно это 4096 или 65536)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (rlimit[1], rlimit[1]))
+    print(f"System file limit increased to: {rlimit[1]}")
+except Exception as e:
+    print(f"Could not increase system file limit: {e}")
 
 
 class NSFWDataset(Dataset):
-    # __init__ остается таким же, как в прошлый раз
     def __init__(self, filepaths, labels, transform=None, cache_dir=None, img_size=256):
         self.filepaths = filepaths
         self.labels = labels
         self.transform = transform
         self.img_size = img_size
+        self.use_cache = False
+        self.cached_filepaths = []
         
         if cache_dir:
             print(f"Disk caching enabled. Cache directory: {cache_dir}")
             os.makedirs(cache_dir, exist_ok=True)
+            self.use_cache = True
             
-            self.cached_filepaths = []
+            # --- ИСПРАВЛЕНИЕ: Генерируем пути с .bmp ---
             for fp in filepaths:
                 hexdigest = hashlib.sha256(fp.encode()).hexdigest()
-                cached_path = os.path.join(cache_dir, hexdigest[:2], hexdigest[2:4], hexdigest + '.png')
+                # ВАЖНО: .bmp
+                cached_path = os.path.join(cache_dir, hexdigest[:2], hexdigest[2:4], hexdigest + '.bmp')
                 self.cached_filepaths.append(cached_path)
 
             tasks_to_cache = []
@@ -207,41 +209,54 @@ class NSFWDataset(Dataset):
                     tasks_to_cache.append((original_fp, cached_fp, self.img_size))
             
             if tasks_to_cache:
-                print(f"Found {len(tasks_to_cache)} images to cache. Starting pre-caching process...")
-                num_workers = os.cpu_count() or 1
+                print(f"Found {len(tasks_to_cache)} images to generate UNCOMPRESSED cache for.")
                 
-                with multiprocessing.Pool(processes=num_workers) as pool:
-                    results_iterator = pool.imap_unordered(_resize_and_save_worker, tasks_to_cache)
-                    list(tqdm(results_iterator, total=len(tasks_to_cache), desc="Warming up disk cache"))
+                workers = os.cpu_count()
+                if workers is None: workers = 4
+                
+                print(f"Starting BMP conversion with {workers} workers...")
+                
+                with multiprocessing.Pool(processes=workers) as pool:
+                    list(tqdm(pool.imap_unordered(_resize_and_save_worker, tasks_to_cache, chunksize=10), 
+                             total=len(tasks_to_cache), desc="Building BMP Cache"))
                 print("Disk cache warm-up complete.")
             else:
                 print("All images are already cached.")
-                
-            self.source_filepaths = self.cached_filepaths
         else:
-            print("Disk caching is disabled. Images will be resized on-the-fly.")
-            self.source_filepaths = self.filepaths
+            print("Disk caching is disabled.")
+            self.cached_filepaths = self.filepaths
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
         label = self.labels[idx]
-        image_path = self.source_filepaths[idx]
+        
+        # СТРОГИЙ РЕЖИМ: Только кэш
+        if self.use_cache:
+            image_path = self.cached_filepaths[idx]
+            if not os.path.exists(image_path):
+                # Если кэша нет - файл битый. Не читаем оригинал, сразу возвращаем заглушку.
+                # Это уберет тормоза и ошибки "Premature end of JPEG file"
+                tensor_img = torch.zeros((3, self.img_size, self.img_size), dtype=torch.float)
+                return tensor_img, torch.tensor(label, dtype=torch.float)
+        else:
+            image_path = self.filepaths[idx]
 
+        img_bgr = None
         try:
+            # Читаем BMP (это очень быстро)
             img_bgr = cv2.imread(image_path)
-            if img_bgr is None:
-                raise IOError(f"Could not read image: {image_path}")
-            
-            # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-            # Было: cv2.COLOR_BGR_RGB
-            # Стало: cv2.COLOR_BGR2RGB
-            numpy_img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        except Exception:
+            pass
 
-        except Exception as e:
-            print(f"Error loading image {image_path}: {e}. Returning a red placeholder.")
-            numpy_img = np.full((self.img_size, self.img_size, 3), (255, 0, 0), dtype=np.uint8)
+        if img_bgr is None:
+            numpy_img = np.zeros((self.img_size, self.img_size, 3), dtype=np.uint8)
+        else:
+            try:
+                numpy_img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            except Exception:
+                numpy_img = np.zeros((self.img_size, self.img_size, 3), dtype=np.uint8)
 
         if self.transform:
             transformed = self.transform(image=numpy_img)
@@ -250,6 +265,8 @@ class NSFWDataset(Dataset):
             tensor_img = transforms.ToTensor()(numpy_img)
 
         return tensor_img, torch.tensor(label, dtype=torch.float)
+
+
 
 # --- (The rest of your helper functions remain the same) ---
 # ...
@@ -466,8 +483,9 @@ def get_sampler_weights(labels):
 def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler, num_epochs, patience_epochs, current_trial_num=None):
     scaler = GradScaler(enabled=(DEVICE.type == 'cuda'))
 
-    best_val_metric = -1.0
-    metric_to_monitor = 'val_f1'
+    # ИЗМЕНЕНИЕ: Инициализируем бесконечностью для минимизации Loss
+    best_val_metric = float('inf') 
+    metric_to_monitor = 'val_loss'
 
     no_improve_epochs = 0
     history = {'train_loss': [], 'val_loss': [], 'val_acc': [], 'val_f1': [], 'val_roc_auc': []}
@@ -536,8 +554,8 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
         if len(val_loader or []) == 0:
             print(f"{desc_prefix}Epoch {epoch + 1}/{num_epochs} - Validation loader is empty or None. Skipping validation.")
             if isinstance(current_trial_num, optuna.trial.Trial):
-                print(f"Warning: Optuna trial {current_trial_num.number} cannot validate. Returning 0.0 F1-score.")
-                return 0.0
+                # Для минимизации loss при ошибке возвращаем бесконечность
+                return float('inf') 
         else:
             val_results = evaluate_model(model, val_loader, criterion, is_validation=True,
                                          is_optuna_trial=isinstance(current_trial_num, optuna.trial.Trial))
@@ -564,10 +582,12 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
              print(print_msg)
 
         if scheduler and (val_loader is not None and len(val_loader) > 0):
-            scheduler.step(val_f1)
+            # ИЗМЕНЕНИЕ: Scheduler смотрит на val_loss (минимизация)
+            scheduler.step(val_loss)
 
-            current_metric_val = val_f1
-            if current_metric_val > best_val_metric:
+            # ИЗМЕНЕНИЕ: Логика сохранения лучшей модели (чем меньше Loss, тем лучше)
+            current_metric_val = val_loss
+            if current_metric_val < best_val_metric: # Знак меньше (<)
                 best_val_metric = current_metric_val
                 no_improve_epochs = 0
                 if not isinstance(current_trial_num, optuna.trial.Trial):
@@ -583,7 +603,8 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
                     break
 
         if isinstance(current_trial_num, optuna.trial.Trial):
-            current_trial_num.report(val_f1, epoch)
+            # ИЗМЕНЕНИЕ: Optuna репортит val_loss
+            current_trial_num.report(val_loss, epoch)
             if current_trial_num.should_prune():
                 del model, optimizer, criterion, scheduler, train_loader, val_loader, history, scaler
                 if DEVICE.type == 'cuda': torch.cuda.empty_cache()
@@ -592,18 +613,16 @@ def train_model(model, train_loader, val_loader, optimizer, criterion, scheduler
     if not isinstance(current_trial_num, optuna.trial.Trial):
         if history['train_loss']:
             plot_training_history(history)
-        if os.path.exists(BEST_STATE_DICT_PATH) and best_val_metric >=0 :
-            print(f"Best model weights from this run saved to {BEST_STATE_DICT_PATH} with ...")
+        # Проверка на существование лучшей модели
+        if os.path.exists(BEST_STATE_DICT_PATH) and best_val_metric < float('inf'):
+            print(f"Best model weights from this run saved to {BEST_STATE_DICT_PATH} with Loss: {best_val_metric:.4f}")
             model.load_state_dict(torch.load(BEST_STATE_DICT_PATH, map_location=DEVICE))
             print("Loaded best model weights for potential further use.")
-        # FIXED: Use BEST_STATE_DICT_PATH instead of the undefined BEST_MODEL_PATH
-        elif not os.path.exists(BEST_STATE_DICT_PATH) and (not history['val_f1'] or best_val_metric < 0):
-             print(f"Warning: No best model saved. Training might have been too short or no improvement seen. Best val F1: {best_val_metric:.4f}")
-        elif not os.path.exists(BEST_STATE_DICT_PATH) and best_val_metric >= 0:
-             print(f"Warning: Best model path {BEST_STATE_DICT_PATH} not found, but best metric was {best_val_metric:.4f}. Using last epoch model.")
+        else:
+             print(f"Warning: Best model not saved or found. Best val Loss: {best_val_metric:.4f}")
 
     if isinstance(current_trial_num, optuna.trial.Trial):
-        return max(0.0, best_val_metric)
+        return best_val_metric # Возвращаем лучший Loss
     else:
         return model
 
@@ -826,7 +845,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
         params[f"fc_dropout_l{i}"] = trial.suggest_float(f"fc_dropout_l{i}", 0.1, 0.9, step=0.05)
 
     lr_fc = trial.suggest_float("lr_fc", 1e-5, 1e-3, log=True)
-    lr_backbone = trial.suggest_float("lr_backbone", 5e-6, 5e-0, log=True)
+    lr_backbone = trial.suggest_float("lr_backbone", 1e-6, 1e-0, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-0, log=True)
 
     model = create_configurable_model(params).to(DEVICE)
@@ -856,14 +875,8 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
         shuffle_train_optuna = True
 
     num_cpus = os.cpu_count()
-    MAX_RECOMMENDED_WORKERS_OPTUNA = 16
-    if num_cpus is None:
-        optuna_num_workers = 4 
-        print(f"Optuna Trial {trial.number}: Could not determine CPU count. Setting num_workers to {optuna_num_workers}.")
-    else:
-        optuna_num_workers = max(1, min(num_cpus // 2, MAX_RECOMMENDED_WORKERS_OPTUNA))
-    if trial.number == 0:
-        print(f"Optuna CPUs available: {num_cpus}. Setting num_workers for Optuna trials to {optuna_num_workers} (capped at {MAX_RECOMMENDED_WORKERS_OPTUNA}).")
+    if num_cpus is None: optuna_num_workers = 4
+    else: optuna_num_workers = max(1, min(num_cpus - 1, 16))
 
     optuna_batch_size = BATCH_SIZE
 
@@ -910,18 +923,19 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
     pos_weight_tensor = torch.tensor([pos_weight_value], device=DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
 
+    # ИЗМЕНЕНИЕ: mode='min' для минимизации Loss
     scheduler_patience = max(1, OPTUNA_PATIENCE // 2) if OPTUNA_EPOCHS > 2 else 0
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=scheduler_patience, min_lr=1e-7)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=scheduler_patience, min_lr=1e-7)
 
-
-    val_f1_score = train_model(model, train_loader_optuna, val_loader_optuna, optimizer, criterion, scheduler,
+    # ИЗМЕНЕНИЕ: Переменная теперь называется val_loss, возвращаем её
+    val_loss = train_model(model, train_loader_optuna, val_loader_optuna, optimizer, criterion, scheduler,
                                num_epochs=OPTUNA_EPOCHS, patience_epochs=OPTUNA_PATIENCE, current_trial_num=trial)
 
     del model, optimizer, criterion, scheduler, train_loader_optuna, val_loader_optuna, train_dataset_optuna, val_dataset_optuna
     if DEVICE.type == 'cuda':
         torch.cuda.empty_cache()
 
-    return val_f1_score
+    return val_loss
 
 def run_optuna_study():
     X_all, y_all = load_data()
@@ -983,24 +997,38 @@ def run_optuna_study():
     n_startup_trials_pruner = min(5, OPTUNA_N_TRIALS // 2) if OPTUNA_N_TRIALS >= 4 else 0
 
     study = optuna.create_study(
-        direction="maximize",
+        direction="minimize",
         pruner=optuna.pruners.MedianPruner(n_startup_trials=n_startup_trials_pruner, n_warmup_steps=n_warmup_steps_pruner, interval_steps=1),
         sampler=optuna.samplers.TPESampler(seed=42)
     )
 
     objective_with_data = lambda trial: objective(trial, X_train_opt, y_train_opt, X_val_opt, y_val_opt)
 
+    print("\n--- Starting Optuna Optimization ---")
+    # --- ИЗМЕНЕНИЕ: Try-Except блок для обхода ошибки ---
     try:
-        study.optimize(objective_with_data, n_trials=OPTUNA_N_TRIALS, timeout=None,
-                       callbacks=[lambda study, cb_trial: torch.cuda.empty_cache() if torch.cuda.is_available() else None])
-    except Exception as e:
-        print(f"Error during Optuna optimization: {e}")
-        if study.trials and any(t.state == optuna.trial.TrialState.COMPLETE for t in study.trials):
-            print("Optimization interrupted, but returning best trial found so far.")
+        study.optimize(
+            objective_with_data, 
+            n_trials=OPTUNA_N_TRIALS, 
+            timeout=None,
+            callbacks=[lambda study, cb_trial: torch.cuda.empty_cache() if torch.cuda.is_available() else None]
+        )
+    except (OSError, RuntimeError) as e:
+        if "Too many open files" in str(e) or "errno 24" in str(e).lower():
+            print(f"\n[WARNING] Hit 'Too many open files' limit at trial {len(study.trials)}.")
+            print("Stopping Optuna early and proceeding with the best parameters found so far.")
         else:
-            return None
+            # Если ошибка другая, печатаем, но тоже пытаемся продолжить, если есть успешные траи
+            print(f"\n[ERROR] Optuna interrupted by error: {e}")
+            if len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]) == 0:
+                raise e # Если ни одного успешного трайа, падаем
+            print("Attempting to proceed with best parameters found so far...")
+    except KeyboardInterrupt:
+        print("\n[INFO] Optuna interrupted by user. Proceeding with best parameters found so far...")
+    # ----------------------------------------------------
 
-    print("\n--- Optuna Study Finished ---")
+    print("\n--- Optuna Study Finished (or Interrupted) ---")
+    
     completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None]
     if not completed_trials:
         print("Optuna study completed, but no trials were completed successfully with a valid value.")
@@ -1009,11 +1037,15 @@ def run_optuna_study():
     try:
         best_trial_candidate = study.best_trial
     except ValueError:
-        best_trial_candidate = None
+        # Если best_trial не определен (например, все запрунены или упали), берем лучший из завершенных
+        if completed_trials:
+            best_trial_candidate = min(completed_trials, key=lambda t: t.value)
+        else:
+            best_trial_candidate = None
 
     if best_trial_candidate and best_trial_candidate.value is not None:
         print("Best trial:")
-        print(f"  Value (Val F1): {best_trial_candidate.value:.4f}")
+        print(f"  Value (Val Loss): {best_trial_candidate.value:.4f}")
         print("  Best hyperparameters: ")
         for key, value in best_trial_candidate.params.items():
             print(f"    {key}: {value}")
@@ -1023,16 +1055,144 @@ def run_optuna_study():
         print(f"Best Optuna parameters saved to {BEST_OPTUNA_PARAMS_PATH}")
         return best_trial_candidate.params
     else:
-        print("Optuna study completed, but no best trial found (possibly all trials failed or were pruned before completion or returned None).")
+        print("Optuna study completed, but no best trial found.")
         return None
 
 
 
 # --- Основная функция ---
 
-def main():
-    global OPTIMAL_THRESHOLD
+def get_available_drives():
+    import getpass
+    user = getpass.getuser()
+    found_drives = []
+    
+    # Стандартные точки монтирования в Linux
+    search_roots = [f"/run/media/{user}", "/media", "/mnt", "/media/" + user]
+    
+    for root in search_roots:
+        if os.path.exists(root):
+            try:
+                for item in os.listdir(root):
+                    full_path = os.path.join(root, item)
+                    if os.path.isdir(full_path):
+                        found_drives.append(full_path)
+            except PermissionError:
+                continue
+    return sorted(list(set(found_drives)))
 
+# --- ФУНКЦИЯ КОНФИГУРАЦИИ ПУТЕЙ ---
+def configure_paths():
+    print("\n" + "="*60)
+    print(" МАСТЕР НАСТРОЙКИ ПУТЕЙ")
+    print("="*60)
+    
+    drives = get_available_drives()
+    
+    # --- ШАГ 1: ИСХОДНИКИ ---
+    print("\n--- ШАГ 1: Где лежат ИСХОДНЫЕ картинки (Source)? ---")
+    print("   (Выбирайте ваш внешний диск)")
+    
+    print(f"1. Текущий проект: {os.path.join(PROJECT_ROOT, 'data/reddit')}")
+    for i, path in enumerate(drives):
+        print(f"{i + 2}. Диск: {path}")
+    print("M. Ввести путь вручную")
+    
+    choice = input("Ваш выбор: ").strip().upper()
+    
+    source_path = ""
+    if choice == "1":
+        source_path = os.path.join(PROJECT_ROOT, "data", "reddit")
+    elif choice == "M":
+        source_path = input("Введите путь к папке с nsfw_images: ").strip()
+    else:
+        try:
+            idx = int(choice) - 2
+            if 0 <= idx < len(drives):
+                source_path = drives[idx]
+            else:
+                source_path = os.path.join(PROJECT_ROOT, "data", "reddit")
+        except ValueError:
+            source_path = os.path.join(PROJECT_ROOT, "data", "reddit")
+
+    if not os.path.exists(os.path.join(source_path, 'nsfw_images')):
+        print(f"⚠️  ВНИМАНИЕ: В {source_path} не найдена папка nsfw_images!")
+        time.sleep(2)
+
+    # --- ШАГ 2: КЭШ ---
+    print("\n--- ШАГ 2: Где создавать КЭШ (Fast Cache)? ---")
+    print("⚡ ВАЖНО: Используется формат BMP (без сжатия).")
+    print("   Это займет ~50-60 ГБ места, но снимет нагрузку с CPU.")
+    print("   В RAM это не влезет! Выбирайте быстрый NVMe SSD.")
+    print("-" * 40)
+    print(f"1. В папке проекта (NVMe?): {os.path.join(PROJECT_ROOT, 'data/fast_cache')}")
+    for i, path in enumerate(drives):
+        print(f"{i + 2}. Диск: {path}")
+    
+    choice_cache = input("Ваш выбор (R/1/2...): ").strip().upper()
+    
+    cache_root = ""
+    if choice_cache == "R":
+        # Используем RAM-диск Linux
+        cache_root = "/dev/shm/reddit_fast_cache"
+    elif choice_cache == "1":
+        cache_root = os.path.join(PROJECT_ROOT, "data", "fast_cache")
+    elif choice_cache == "M":
+        cache_root = input("Введите путь для кэша: ").strip()
+    else:
+        try:
+            idx = int(choice_cache) - 2
+            if 0 <= idx < len(drives):
+                cache_root = os.path.join(drives[idx], "reddit_fast_cache")
+            else:
+                cache_root = os.path.join(PROJECT_ROOT, "data", "fast_cache")
+        except ValueError:
+            cache_root = os.path.join(PROJECT_ROOT, "data", "fast_cache")
+
+    return source_path, cache_root
+
+# --- MAIN ---
+def main():
+    global OPTIMAL_THRESHOLD, SLUT_DATA_DIR, REGULAR_DATA_DIR, DISK_CACHE_DIR
+
+    # 1. Запускаем мастер выбора путей (ДВОЙНОЙ ВЫБОР)
+    source_base, cache_full_path = configure_paths()
+    
+    SLUT_DATA_DIR = os.path.join(source_base, 'nsfw_images')
+    REGULAR_DATA_DIR = os.path.join(source_base, 'sfw_images')
+    DISK_CACHE_DIR = cache_full_path
+    
+    # 2. Создаем и проверяем кэш
+    print(f"\n--> Настройка кэша: {DISK_CACHE_DIR}")
+    try:
+        os.makedirs(DISK_CACHE_DIR, exist_ok=True)
+        # Тест записи
+        test_file = os.path.join(DISK_CACHE_DIR, '.write_test')
+        with open(test_file, 'w') as f: f.write('ok')
+        os.remove(test_file)
+    except PermissionError:
+        print(f"\n❌ ОШИБКА: Нет прав на запись в {DISK_CACHE_DIR}")
+        print("Убедитесь, что диск смонтирован с правами вашего пользователя (chown/chmod).")
+        sys.exit(1)
+
+    print("\n" + "="*60)
+    print(f"✅ КОНФИГУРАЦИЯ УСПЕШНА:")
+    print(f"   Источник (медленный): {source_base}")
+    print(f"   Кэш (быстрый):        {DISK_CACHE_DIR}")
+    print("="*60 + "\n")
+
+    # --- ОСТАЛЬНОЙ КОД ---
+    
+    # Для быстрого SSD используем много потоков
+    num_cpus_final = os.cpu_count()
+    if num_cpus_final is None: 
+        final_num_workers = 4
+    else: 
+        # Используем почти все ядра, SSD M.2 это выдержит
+        final_num_workers = max(1, min(num_cpus_final, 24))
+        
+    # ... (дальше идет ваш стандартный код) ...
+    
     params_for_final_training = None
     model_trained = None
 
@@ -1110,14 +1270,14 @@ def main():
     X_train_full, 
     y_train_full, 
     transform=train_transform, 
-    cache_dir=DISK_CACHE_DIR,  # Включаем кэширование на диске
+    cache_dir=DISK_CACHE_DIR,
     img_size=IMG_SIZE
     )
     test_dataset = NSFWDataset(
         X_test_final, 
         y_test_final, 
         transform=val_transform, 
-        cache_dir=None, # Отключаем кэширование для тестового набора
+        cache_dir=None,
         img_size=IMG_SIZE
     )
 
@@ -1125,30 +1285,31 @@ def main():
         print("Error: Final training dataset is empty. Exiting.")
         return
 
-    num_cpus_final = os.cpu_count()
-    MAX_RECOMMENDED_WORKERS_FINAL = 24
-    if num_cpus_final is None:
-        final_num_workers = 4
-        print(f"Could not determine CPU count. Setting final_num_workers to {final_num_workers}.")
-    else:
-        if num_cpus_final <= 2:
-            final_num_workers = num_cpus_final
-        else:
-            final_num_workers = max(1, min(num_cpus_final - 2, MAX_RECOMMENDED_WORKERS_FINAL))
-    print(f"Final training CPUs available: {num_cpus_final}. Setting final_num_workers to {final_num_workers} (capped at {MAX_RECOMMENDED_WORKERS_FINAL}).")
-
+    print(f"Final training DataLoader workers: {final_num_workers}")
 
     drop_last_final_train = (len(train_dataset) > BATCH_SIZE and
                              len(train_dataset) % BATCH_SIZE == 1)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=BATCH_SIZE, sampler=sampler, shuffle=shuffle_train,
-        num_workers=final_num_workers, pin_memory=True if DEVICE.type == 'cuda' else False,
-        persistent_workers=True if final_num_workers > 0 and DEVICE.type == 'cuda' else False,
-        drop_last=drop_last_final_train,
-        prefetch_factor=2
-    )
+    final_num_workers = os.cpu_count() 
+    if final_num_workers is None: final_num_workers = 8
+    
+    # Если ядер много (12+), можно оставить 1-2 свободными для системы
+    if final_num_workers > 10:
+        final_num_workers -= 2
 
+    print(f"Final training DataLoader workers: {final_num_workers}")
+
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=BATCH_SIZE, 
+        sampler=sampler, 
+        shuffle=shuffle_train,
+        num_workers=final_num_workers, 
+        pin_memory=True,             
+        persistent_workers=True,     
+        drop_last=drop_last_final_train,
+        prefetch_factor=8            # <--- УВЕЛИЧИЛИ БУФЕР (было 4)
+    )
     test_loader_num_workers = final_num_workers
     test_loader = []
     if len(test_dataset) > 0:
@@ -1192,18 +1353,18 @@ def main():
 
     optimizer = optim.AdamW(optimizer_grouped_parameters, weight_decay=weight_decay)
     scheduler_patience_final = max(1, PATIENCE - 2)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=scheduler_patience_final, min_lr=1e-7)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=scheduler_patience_final, min_lr=1e-7)
 
     print("\n--- Starting Final Training Session ---")
     val_loader_for_final_train = test_loader if len(test_loader) > 0 else None
 
+    # train_model теперь сама обрабатывает логику минимизации Loss
     model_trained = train_model(model_trained, train_loader, val_loader_for_final_train, optimizer, criterion, scheduler,
                                 num_epochs=EPOCHS, patience_epochs=PATIENCE, current_trial_num=None)
 
     if len(test_loader) > 0 and model_trained is not None:
         print("\n--- Final Model Evaluation on Independent Test Set & SHAP Data Preparation ---")
         model_for_eval = None
-        # FIXED: Use BEST_STATE_DICT_PATH instead of BEST_MODEL_PATH
         if os.path.exists(BEST_STATE_DICT_PATH):
             print(f"Loading best saved model from {BEST_STATE_DICT_PATH} for final evaluation.")
             model_for_eval = create_configurable_model(params_for_final_training)
@@ -1211,11 +1372,9 @@ def main():
                 model_for_eval.load_state_dict(torch.load(BEST_STATE_DICT_PATH, map_location=DEVICE))
                 print("Successfully loaded best model weights.")
             except Exception as e:
-                # FIXED: Use BEST_STATE_DICT_PATH in the error message
                 print(f"Error loading best model weights from {BEST_STATE_DICT_PATH}: {e}. Using model from last training epoch if available.")
                 model_for_eval = model_trained
         else:
-            # FIXED: Use BEST_STATE_DICT_PATH in the warning message
             print(f"Warning: Best model file {BEST_STATE_DICT_PATH} not found. Using model from last training epoch if available.")
             model_for_eval = model_trained
 
@@ -1310,12 +1469,10 @@ def main():
 
     print("\n--- Exporting and Quantizing Model ---")
     model_to_export_and_quantize = None
-    # FIXED: Use BEST_STATE_DICT_PATH
     if os.path.exists(BEST_STATE_DICT_PATH) and model_trained is not None:
         print(f"Using best saved model from {BEST_STATE_DICT_PATH} for export and quantization.")
         model_to_export_and_quantize = create_configurable_model(params_for_final_training)
         try:
-            # FIXED: Use BEST_STATE_DICT_PATH
             model_to_export_and_quantize.load_state_dict(torch.load(BEST_STATE_DICT_PATH, map_location='cpu'))
             model_to_export_and_quantize.eval()
         except Exception as e:
