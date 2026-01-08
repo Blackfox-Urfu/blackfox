@@ -75,10 +75,10 @@ print(f"Using device: {DEVICE}")
 PERFORM_OPTUNA_SEARCH = True
 IMG_SIZE = 256
 BATCH_SIZE = 512
-EPOCHS = 7
+EPOCHS = 15
 PATIENCE = 3
 OPTUNA_N_TRIALS = 30
-OPTUNA_EPOCHS = 5
+OPTUNA_EPOCHS = 10
 OPTUNA_PATIENCE = min(max(1, OPTUNA_EPOCHS - 1), 3)
 OPTUNA_DATASET_FRACTION = 0.6
 FINAL_TEST_SET_FRACTION = 0.2
@@ -845,7 +845,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
         params[f"fc_dropout_l{i}"] = trial.suggest_float(f"fc_dropout_l{i}", 0.1, 0.9, step=0.05)
 
     lr_fc = trial.suggest_float("lr_fc", 1e-5, 1e-3, log=True)
-    lr_backbone = trial.suggest_float("lr_backbone", 1e-6, 1e-0, log=True)
+    lr_backbone = trial.suggest_float("lr_backbone", 1e-6, 1e-4, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-0, log=True)
 
     model = create_configurable_model(params).to(DEVICE)
@@ -916,11 +916,7 @@ def objective(trial: optuna.trial.Trial, X_train_paths, y_train, X_val_paths, y_
 
     optimizer = optim.AdamW(optimizer_grouped_parameters, weight_decay=weight_decay)
 
-    if train_counts_optuna.get(1, 0) > 0 and train_counts_optuna.get(0,0) > 0:
-        pos_weight_value = train_counts_optuna.get(0, 0) / train_counts_optuna.get(1,0)
-    else:
-        pos_weight_value = 1.0
-    pos_weight_tensor = torch.tensor([pos_weight_value], device=DEVICE)
+    pos_weight_tensor = torch.tensor([1.0], device=DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
 
     # ИЗМЕНЕНИЕ: mode='min' для минимизации Loss
@@ -1325,14 +1321,8 @@ def main():
 
     model_trained = create_configurable_model(params_for_final_training)
 
-    train_counts = Counter(y_train_full)
-    if train_counts.get(1, 0) > 0 and train_counts.get(0,0) > 0:
-        pos_weight_value = train_counts.get(0, 0) / train_counts.get(1,0)
-    else:
-        print("Warning: Not enough class diversity in final training data for pos_weight. Using 1.0.")
-        pos_weight_value = 1.0
-    pos_weight_tensor = torch.tensor([pos_weight_value], device=DEVICE)
-    print(f"Using pos_weight for BCEWithLogitsLoss: {pos_weight_tensor.item():.2f}")
+    print("Using WeightedRandomSampler, so pos_weight is set to 1.0 explicitly.")
+    pos_weight_tensor = torch.tensor([1.0], device=DEVICE)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
 
     lr_fc = params_for_final_training.get("lr_fc", 1e-4)
